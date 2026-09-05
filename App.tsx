@@ -23,7 +23,9 @@ const DEFAULT_SETTINGS: Settings = {
   totalTrials: 25,
   theme: 'cyan',
   devMode: false,
-  ballSize: 0.5,
+  /* A full cell. 0.5 was the slider's own minimum, so the app shipped at the
+     smallest stimulus it can draw, on a 7x7 grid. */
+  ballSize: 1.0,
   variableN: false,
   spatialEnabled: true,
   audioEnabled: true,

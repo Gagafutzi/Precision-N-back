@@ -149,7 +149,7 @@ const SettingsComponent: React.FC<SettingsProps> = ({ settings, onSave, onBack }
         {/* Ball Size */}
         <div className="flex justify-between items-center">
           <label htmlFor="ballSize">Stimulus Size (% of cell)</label>
-          <input type="range" name="ballSize" id="ballSize" min="50" max="200" value={localSettings.ballSize * 100} onChange={handleSliderChange} className="w-1/2" />
+          <input type="range" name="ballSize" id="ballSize" min="50" max="400" value={localSettings.ballSize * 100} onChange={handleSliderChange} className="w-1/2" />
           <span>{(localSettings.ballSize * 100).toFixed(0)}%</span>
         </div>
 

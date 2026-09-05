@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { NBackEvent, Score, Settings, Shape, Modality } from '../types';
-import { SYLLABLES, SYLLABLE_AUDIO, SYLLABLE_CONFUSABLE } from '../syllableAudio';
+import { SYLLABLES, SYLLABLE_AUDIO } from '../syllableAudio';
 
 /*
  * Decoded once and held, not decoded per trial: decoding is asynchronous, and a
@@ -345,12 +345,41 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
             case 'audio':
               newEvent.audio = targetEvent.audio * Math.pow(2, ((Math.random() < 0.5 ? 1 : -1) * audioThreshold) / 1200);
               break;
-            case 'syllable':
-              /* The minimal pair. There is no threshold to shave here, so the
-                 lure is the one syllable differing by a single feature: voicing
-                 for the stops, place for the nasals. */
-              newEvent.syllable = SYLLABLE_CONFUSABLE[targetEvent.syllable] ?? targetEvent.syllable;
+            case 'syllable': {
+              /*
+               * A TEMPORAL lure: the syllable heard n-1 or n+1 trials back,
+               * rather than one that merely sounds like the target.
+               *
+               * The minimal pair this replaces was the wrong model. A lure has
+               * to be falsely *recalled* as a match, and bah/pah are only
+               * acoustically close — you either encoded "bah" or you did not,
+               * and if the two are tellable apart when heard then the lure is
+               * an ordinary non-match doing nothing. Acoustic similarity is not
+               * memory confusability.
+               *
+               * Off-by-one familiarity is. The syllable genuinely did occur,
+               * and recently; only its distance back is wrong. That is the
+               * error this task is about, and it is the standard n-back lure
+               * for exactly this reason. It also needs no confusable partner,
+               * so it works for any categorical stimulus.
+               */
+              const offsets = [n - 1, n + 1].filter(o => o > 0 && trialNumber - o >= 0);
+              const candidates = offsets
+                .map(o => history[trialNumber - o])
+                .filter(e => e && e.syllable !== targetEvent.syllable);
+              if (candidates.length > 0) {
+                newEvent.syllable = candidates[Math.floor(Math.random() * candidates.length)].syllable;
+              } else {
+                /* No usable neighbour yet — early in a block, or it happens to
+                   carry the target's own syllable, which would be a real match
+                   rather than a lure. Fall back to a plain non-match. */
+                while (newEvent.syllable === targetEvent.syllable) {
+                  newEvent.syllable = Math.floor(Math.random() * SYLLABLES.length);
+                }
+                newEvent.lureType = 'none';
+              }
               break;
+            }
             case 'color':
               const targetHues = [...targetEvent.hues] as [number, number, number];
               const indices = [0, 1, 2];
