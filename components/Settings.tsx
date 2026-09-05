@@ -116,6 +116,26 @@ const SettingsComponent: React.FC<SettingsProps> = ({ settings, onSave, onBack }
           </div>
         )}
         
+        {/* 3D spatial — a separate mode, not a harder grid */}
+        {localSettings.spatialEnabled && (
+          <>
+            <div className="flex justify-between items-center">
+              <label htmlFor="spatial3dEnabled">3D Position</label>
+              <input type="checkbox" name="spatial3dEnabled" id="spatial3dEnabled"
+                     checked={localSettings.spatial3dEnabled} onChange={handleChange}
+                     className="w-5 h-5 accent-cyan-500" />
+            </div>
+            {localSettings.spatial3dEnabled && (
+              <div className="flex justify-between items-center">
+                <label htmlFor="gridLayers">Depth (layers)</label>
+                <input type="number" name="gridLayers" id="gridLayers" min="2" max="6"
+                       value={localSettings.gridLayers} onChange={handleChange}
+                       className="w-20 p-2 bg-gray-700 rounded" />
+              </div>
+            )}
+          </>
+        )}
+
         {/* Shape Vertices */}
         {localSettings.shapeEnabled && (
           <div className="flex justify-between items-center">

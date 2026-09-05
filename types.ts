@@ -31,7 +31,9 @@ export type ColorPattern = 'vertical' | 'horizontal' | 'triangles' | 'radial' | 
 
 export type NBackEvent = {
   id: number;
-  spatial: { row: number; col: number };
+  /* `layer` is the depth index. It is always present and is 0 whenever the 3D
+     mode is off, so every comparison can read it unconditionally. */
+  spatial: { row: number; col: number; layer: number };
   audio: number; // frequency in Hz
   hues: [number, number, number]; // hue in degrees for 3-part stimulus
   shape: Shape;
@@ -60,6 +62,11 @@ export type Settings = {
   isi: number;
   gridRows: number;
   gridCols: number;
+  /* A separate mode rather than a replacement: the 2D grid is what the spatial
+     threshold was calibrated against, so switching to depth is a different task
+     and not a harder setting of the same one. */
+  spatial3dEnabled: boolean;
+  gridLayers: number;
   audioThreshold: number;
   colorThreshold: number;
   shapeThreshold: number;
@@ -90,6 +97,10 @@ export type PerformanceRecord = {
     shapeThreshold: number;
     gridRows: number;
     gridCols: number;
+    /* Optional: records written before the 3D mode existed have neither, and a
+       reader must be able to tell "2D" from "not recorded". */
+    spatial3dEnabled?: boolean;
+    gridLayers?: number;
   };
   score: Score;
   accuracy?: number; // Optional accuracy field

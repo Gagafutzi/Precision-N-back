@@ -68,6 +68,9 @@ const generateRandomHues = (): [number, number, number] => {
 
 const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   const { nLevel, matchRate, lureRate, isi, totalTrials, ballSize, variableN, devMode, gridRows, gridCols, feedbackEnabled } = settings;
+  /* Depth is one layer deep unless the 3D mode is on, so every position is a
+     three-part coordinate and nothing downstream needs to branch. */
+  const layers = settings.spatial3dEnabled ? Math.max(2, settings.gridLayers) : 1;
   const { audioThreshold, colorThreshold, shapeThreshold } = settings;
   
   const stimulusDuration = 500;
@@ -223,7 +226,7 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
     
     const newEvent: NBackEvent = {
         id: trialNumber, n,
-        spatial: { row: Math.floor(Math.random() * gridRows), col: Math.floor(Math.random() * gridCols) },
+        spatial: { row: Math.floor(Math.random() * gridRows), col: Math.floor(Math.random() * gridCols), layer: Math.floor(Math.random() * layers) },
         audio: 200 + Math.random() * 600,
         hues: generateRandomHues(),
         shape: generateBaseShape(settings.shapeVertices),
@@ -279,11 +282,19 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
           devInfoParts.push(`${mod.charAt(0).toUpperCase()}:LURE`);
           switch (mod) {
             case 'spatial':
-              const { row, col } = targetEvent.spatial;
+              const { row, col, layer } = targetEvent.spatial;
+              /* One step along a single axis. In 3D that includes the two depth
+                 neighbours, which is the whole point of the mode: a lure one
+                 layer away is the one the eye is least able to reject. */
               const possibleLures = [
-                  { row: row - 1, col }, { row: row + 1, col },
-                  { row, col: col - 1 }, { row, col: col + 1 }
-              ].filter(p => p.row >= 0 && p.row < gridRows && p.col >= 0 && p.col < gridCols);
+                  { row: row - 1, col, layer }, { row: row + 1, col, layer },
+                  { row, col: col - 1, layer }, { row, col: col + 1, layer },
+                  ...(layers > 1
+                    ? [{ row, col, layer: layer - 1 }, { row, col, layer: layer + 1 }]
+                    : []),
+              ].filter(p => p.row >= 0 && p.row < gridRows
+                         && p.col >= 0 && p.col < gridCols
+                         && p.layer >= 0 && p.layer < layers);
               if (possibleLures.length > 0) {
                   newEvent.spatial = possibleLures[Math.floor(Math.random() * possibleLures.length)];
               }
@@ -317,8 +328,10 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
           // FIX: Ensure random event is not an accidental match, which would be confusing for the user.
           if (targetEvent) {
             if (mod === 'spatial') {
-              while (newEvent.spatial.row === targetEvent.spatial.row && newEvent.spatial.col === targetEvent.spatial.col) {
-                newEvent.spatial = { row: Math.floor(Math.random() * gridRows), col: Math.floor(Math.random() * gridCols) };
+              while (newEvent.spatial.row === targetEvent.spatial.row
+                     && newEvent.spatial.col === targetEvent.spatial.col
+                     && newEvent.spatial.layer === targetEvent.spatial.layer) {
+                newEvent.spatial = { row: Math.floor(Math.random() * gridRows), col: Math.floor(Math.random() * gridCols), layer: Math.floor(Math.random() * layers) };
               }
             }
             if (mod === 'audio') {
@@ -460,10 +473,71 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
         ref={gameBoardRef}
         className="relative w-full bg-gray-900 rounded-lg mb-6 shadow-inner overflow-hidden"
         style={{
-          ...gridStyle,
+          /* The flat grid lines belong to the 2D board. In 3D each layer draws
+             its own, or the fixed backdrop reads as a plane the cells float in
+             front of. */
+          ...(settings.spatial3dEnabled ? {} : gridStyle),
           aspectRatio: `${gridCols} / ${gridRows}`,
+          ...(settings.spatial3dEnabled
+            ? { perspective: '60svmin', perspectiveOrigin: 'center center' }
+            : {}),
         }}
       >
+        {settings.spatial3dEnabled && (
+          /* One plane per layer, spaced along Z. Perspective does the rest:
+             a nearer layer is drawn larger, and that size difference IS the
+             depth cue, so nothing has to be scaled by hand.
+
+             The technique — a perspective container over preserve-3d planes —
+             is the one used by the Quad Box project (MIT, Copyright (c) 2025
+             The Quad Box Project Contributors), reimplemented here because that
+             project is Svelte and this one is React. */
+          <div className="absolute inset-0" style={{ transformStyle: 'preserve-3d' }}>
+            {Array.from({ length: layers }, (_, l) => {
+              const z = (l - (layers - 1) / 2) * 7;
+              const isNear = currentEvent ? l === currentEvent.spatial.layer : false;
+              return (
+                <div
+                  key={l}
+                  className="absolute inset-0"
+                  style={{
+                    ...gridStyle,
+                    transform: `translateZ(${z}svmin)`,
+                    transformStyle: 'preserve-3d',
+                    /* Layers behind the lit one are dimmed so the stack reads as
+                       depth rather than as overlapping grids. */
+                    opacity: isStimulusVisible && isNear ? 1 : 0.35,
+                    border: '1px solid rgba(128,128,128,0.12)',
+                  }}
+                >
+                  {isStimulusVisible && currentEvent && isNear && (
+                    <div
+                      className="absolute"
+                      style={{
+                        left: `${(currentEvent.spatial.col + 0.5) / gridCols * 100}%`,
+                        top: `${(currentEvent.spatial.row + 0.5) / gridRows * 100}%`,
+                        transform: 'translate(-50%, -50%)',
+                        width: `${stimulusSize}px`,
+                        height: `${stimulusSize}px`,
+                      }}
+                    >
+                      <ShapeDisplay
+                        shape={currentEvent.shape}
+                        hues={currentEvent.hues}
+                        size={stimulusSize}
+                        colorEnabled={settings.colorEnabled}
+                        shapeEnabled={settings.shapeEnabled}
+                        colorPattern={settings.colorPattern}
+                        bubbleData={currentEvent.bubbleData}
+                        topoData={currentEvent.topoData}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
         {devMode && (
           <div className="absolute top-2 left-2 px-2 py-1 bg-yellow-500/20 text-yellow-300 text-xs font-mono rounded z-10">
             {devLureInfo}
@@ -475,7 +549,7 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
           </div>
         )}
 
-        {isStimulusVisible && currentEvent && (
+        {!settings.spatial3dEnabled && isStimulusVisible && currentEvent && (
           <div className="absolute" style={{
                 left: `${(currentEvent.spatial.col + 0.5) / gridCols * 100}%`,
                 top: `${(currentEvent.spatial.row + 0.5) / gridRows * 100}%`,
