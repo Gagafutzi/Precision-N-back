@@ -29,6 +29,7 @@ const DEFAULT_SETTINGS: Settings = {
   audioEnabled: true,
   colorEnabled: false,
   shapeEnabled: false,
+  syllableEnabled: false,
   shapeVertices: 6,
   colorPattern: 'vertical',
   feedbackEnabled: true,

@@ -63,6 +63,7 @@ const SettingsComponent: React.FC<SettingsProps> = ({ settings, onSave, onBack }
             <div className="flex items-center gap-3"><input type="checkbox" name="audioEnabled" id="audioEnabled" checked={localSettings.audioEnabled} onChange={handleChange} className="w-6 h-6" /><label htmlFor="audioEnabled">Audio (Tone)</label></div>
             <div className="flex items-center gap-3"><input type="checkbox" name="colorEnabled" id="colorEnabled" checked={localSettings.colorEnabled} onChange={handleChange} className="w-6 h-6" /><label htmlFor="colorEnabled">Color (Hues)</label></div>
             <div className="flex items-center gap-3"><input type="checkbox" name="shapeEnabled" id="shapeEnabled" checked={localSettings.shapeEnabled} onChange={handleChange} className="w-6 h-6" /><label htmlFor="shapeEnabled">Shape (Contour)</label></div>
+            <div className="flex items-center gap-3"><input type="checkbox" name="syllableEnabled" id="syllableEnabled" checked={localSettings.syllableEnabled} onChange={handleChange} className="w-6 h-6" /><label htmlFor="syllableEnabled">Syllable (Spoken)</label></div>
           </div>
           <p className="text-xs text-gray-400 mt-2 px-1">Note: When Color and Shape are enabled, the shape's contour masks the color pattern.</p>
         </div>

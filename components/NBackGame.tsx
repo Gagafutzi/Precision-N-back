@@ -1,6 +1,41 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { NBackEvent, Score, Settings, Shape, Modality } from '../types';
+import { SYLLABLES, SYLLABLE_AUDIO, SYLLABLE_CONFUSABLE } from '../syllableAudio';
+
+/*
+ * Decoded once and held, not decoded per trial: decoding is asynchronous, and a
+ * stimulus arriving after its own trial has ended is worse than one that never
+ * played — the response window has already closed on it.
+ */
+let sylCtx: AudioContext | null = null;
+const sylBuffers: (AudioBuffer | null)[] = [];
+
+async function primeSyllables() {
+  if (!sylCtx) sylCtx = new AudioContext();
+  if (sylCtx.state === 'suspended') { try { await sylCtx.resume(); } catch (e) { /* awaits a gesture */ } }
+  await Promise.all(SYLLABLES.map(async (name, i) => {
+    if (sylBuffers[i]) return;
+    const b64 = SYLLABLE_AUDIO[name];
+    if (!b64) return;
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+    try { sylBuffers[i] = await sylCtx!.decodeAudioData(bytes.buffer); } catch (e) { sylBuffers[i] = null; }
+  }));
+}
+
+function playSyllable(index: number) {
+  const buf = sylBuffers[index];
+  if (!sylCtx || !buf) return;
+  if (sylCtx.state === 'suspended') sylCtx.resume();
+  const src = sylCtx.createBufferSource();
+  src.buffer = buf;
+  const g = sylCtx.createGain();
+  g.gain.value = 0.9;
+  src.connect(g).connect(sylCtx.destination);
+  src.start();
+}
 import ShapeDisplay from './ShapeDisplay';
 
 declare namespace Tone {
@@ -79,15 +114,15 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   const [currentEvent, setCurrentEvent] = useState<NBackEvent | null>(null);
   const [trialNumber, setTrialNumber] = useState(0);
   const [isStimulusVisible, setIsStimulusVisible] = useState(false);
-  const [score, setScore] = useState<Score>({ hits: { spatial: 0, audio: 0, color: 0, shape: 0 }, misses: 0, audioFalseAlarms: 0, spatialFalseAlarms: 0, colorFalseAlarms: 0, shapeFalseAlarms: 0 });
-  const [buttonHighlights, setButtonHighlights] = useState<Record<Modality, 'none' | 'hit' | 'miss' | 'false_alarm'>>({ spatial: 'none', audio: 'none', color: 'none', shape: 'none' });
+  const [score, setScore] = useState<Score>({ hits: { spatial: 0, audio: 0, color: 0, shape: 0, syllable: 0 }, misses: 0, audioFalseAlarms: 0, spatialFalseAlarms: 0, colorFalseAlarms: 0, shapeFalseAlarms: 0, syllableFalseAlarms: 0 });
+  const [buttonHighlights, setButtonHighlights] = useState<Record<Modality, 'none' | 'hit' | 'miss' | 'false_alarm'>>({ spatial: 'none', audio: 'none', color: 'none', shape: 'none', syllable: 'none' });
   const [devLureInfo, setDevLureInfo] = useState<string>('');
   
   const [stimulusSize, setStimulusSize] = useState(settings.ballSize * 100);
   const gameBoardRef = useRef<HTMLDivElement>(null);
   const synthRef = useRef<Tone.Synth | null>(null);
   const transportEventIdRef = useRef<number | null>(null);
-  const totalMatchesRef = useRef<Record<Modality, number>>({ spatial: 0, audio: 0, color: 0, shape: 0 });
+  const totalMatchesRef = useRef<Record<Modality, number>>({ spatial: 0, audio: 0, color: 0, shape: 0, syllable: 0 });
   const startTimeRef = useRef<number>(Date.now());
   
   const historyRef = useRef(history);
@@ -107,6 +142,7 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
     if (settings.audioEnabled) active.push('audio');
     if (settings.colorEnabled) active.push('color');
     if (settings.shapeEnabled) active.push('shape');
+    if (settings.syllableEnabled) active.push('syllable');
     activeModalitiesRef.current = active;
   }, [settings]);
 
@@ -153,6 +189,9 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
     respondedToRef.current.add(responseKey);
   }, [feedbackEnabled]);
 
+  /* Decoding starts when the channel is switched on, not when a trial needs it. */
+  useEffect(() => { if (settings.syllableEnabled) void primeSyllables(); }, [settings.syllableEnabled]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return;
@@ -170,13 +209,16 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
         case 'j':
           if (settings.shapeEnabled) handleUserResponse('shape');
           break;
+        case 'k':
+          if (settings.syllableEnabled) handleUserResponse('syllable');
+          break;
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [handleUserResponse, settings.spatialEnabled, settings.audioEnabled, settings.colorEnabled, settings.shapeEnabled]);
+  }, [handleUserResponse, settings.spatialEnabled, settings.audioEnabled, settings.colorEnabled, settings.shapeEnabled, settings.syllableEnabled]);
 
   const endSession = useCallback((completed: boolean) => {
       Tone.Transport.stop();
@@ -230,7 +272,8 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
         audio: 200 + Math.random() * 600,
         hues: generateRandomHues(),
         shape: generateBaseShape(settings.shapeVertices),
-        isMatch: { audio: false, spatial: false, color: false, shape: false },
+        syllable: Math.floor(Math.random() * SYLLABLES.length),
+        isMatch: { audio: false, spatial: false, color: false, shape: false, syllable: false },
         lureType: 'none',
     };
 
@@ -302,6 +345,12 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
             case 'audio':
               newEvent.audio = targetEvent.audio * Math.pow(2, ((Math.random() < 0.5 ? 1 : -1) * audioThreshold) / 1200);
               break;
+            case 'syllable':
+              /* The minimal pair. There is no threshold to shave here, so the
+                 lure is the one syllable differing by a single feature: voicing
+                 for the stops, place for the nasals. */
+              newEvent.syllable = SYLLABLE_CONFUSABLE[targetEvent.syllable] ?? targetEvent.syllable;
+              break;
             case 'color':
               const targetHues = [...targetEvent.hues] as [number, number, number];
               const indices = [0, 1, 2];
@@ -334,6 +383,11 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
                 newEvent.spatial = { row: Math.floor(Math.random() * gridRows), col: Math.floor(Math.random() * gridCols), layer: Math.floor(Math.random() * layers) };
               }
             }
+            if (mod === 'syllable') {
+              while (newEvent.syllable === targetEvent.syllable) {
+                newEvent.syllable = Math.floor(Math.random() * SYLLABLES.length);
+              }
+            }
             if (mod === 'audio') {
               // Check for perceptible similarity (e.g., less than 1 Hz difference)
               while (Math.abs(newEvent.audio - targetEvent.audio) < 1) {
@@ -354,7 +408,7 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   }, [nLevel, variableN, matchRate, lureRate, settings, validNValues]);
   
   const runTrial = useCallback(() => {
-    const nextButtonHighlights: Record<Modality, 'none' | 'hit' | 'miss' | 'false_alarm'> = { spatial: 'none', audio: 'none', color: 'none', shape: 'none' };
+    const nextButtonHighlights: Record<Modality, 'none' | 'hit' | 'miss' | 'false_alarm'> = { spatial: 'none', audio: 'none', color: 'none', shape: 'none', syllable: 'none' };
     if (feedbackEnabled) {
       const activeModalities = activeModalitiesRef.current;
       if (trialNumberRef.current > 0) {
@@ -382,6 +436,7 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
     setTrialNumber(t => t + 1);
     setIsStimulusVisible(true);
 
+    if (settings.syllableEnabled) playSyllable(newEvent.syllable);
     if (settings.audioEnabled && synthRef.current) {
       synthRef.current.triggerAttackRelease(newEvent.audio, `${stimulusDuration / 1000}s`);
     }
@@ -576,6 +631,7 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
         {settings.audioEnabled && <button onClick={() => handleUserResponse('audio')} className={getButtonClass('audio')}>Audio <span className="text-xs opacity-70">(L)</span></button>}
         {settings.colorEnabled && <button onClick={() => handleUserResponse('color')} className={getButtonClass('color')}>Color <span className="text-xs opacity-70">(F)</span></button>}
         {settings.shapeEnabled && <button onClick={() => handleUserResponse('shape')} className={getButtonClass('shape')}>Shape <span className="text-xs opacity-70">(J)</span></button>}
+        {settings.syllableEnabled && <button onClick={() => handleUserResponse('syllable')} className={getButtonClass('syllable')}>Syllable <span className="text-xs opacity-70">(K)</span></button>}
       </div>
 
       <div className="mt-6 w-full flex justify-between items-center text-gray-400 font-mono">

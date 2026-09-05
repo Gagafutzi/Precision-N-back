@@ -37,14 +37,17 @@ export type NBackEvent = {
   audio: number; // frequency in Hz
   hues: [number, number, number]; // hue in degrees for 3-part stimulus
   shape: Shape;
-  isMatch: { audio: boolean, spatial: boolean, color: boolean, shape: boolean };
-  lureType: 'none' | 'audio' | 'spatial' | 'color' | 'shape';
+  /* Index into SYLLABLES. Categorical, unlike every other channel here:
+     there is no threshold to tighten, only whether you heard which one. */
+  syllable: number;
+  isMatch: { audio: boolean, spatial: boolean, color: boolean, shape: boolean, syllable: boolean };
+  lureType: 'none' | 'audio' | 'spatial' | 'color' | 'shape' | 'syllable';
   n: number; // The n-level for this specific trial
   bubbleData?: { cx: number; cy: number; r: number; }[];
   topoData?: { points: {x: number, y: number}[] }[];
 };
 
-export type Modality = 'spatial' | 'audio' | 'color' | 'shape';
+export type Modality = 'spatial' | 'audio' | 'color' | 'shape' | 'syllable';
 
 export type Score = {
   hits: Record<Modality, number>;
@@ -53,6 +56,7 @@ export type Score = {
   spatialFalseAlarms: number;
   colorFalseAlarms: number;
   shapeFalseAlarms: number;
+  syllableFalseAlarms: number;
 };
 
 export type Settings = {
@@ -80,6 +84,10 @@ export type Settings = {
   audioEnabled: boolean;
   colorEnabled: boolean;
   shapeEnabled: boolean;
+  /* The verbal channel. It sits beside the tone rather than replacing it:
+     the tone is a pitch discrimination and this is an identity, which are
+     different questions and are allowed to run together. */
+  syllableEnabled: boolean;
   shapeVertices: number;
   colorPattern: ColorPattern;
   feedbackEnabled: boolean;
