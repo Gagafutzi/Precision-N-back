@@ -127,12 +127,30 @@ const SettingsComponent: React.FC<SettingsProps> = ({ settings, onSave, onBack }
                      className="w-5 h-5 accent-cyan-500" />
             </div>
             {localSettings.spatial3dEnabled && (
-              <div className="flex justify-between items-center">
-                <label htmlFor="gridLayers">Depth (layers)</label>
-                <input type="number" name="gridLayers" id="gridLayers" min="2" max="6"
-                       value={localSettings.gridLayers} onChange={handleChange}
-                       className="w-20 p-2 bg-gray-700 rounded" />
-              </div>
+              <>
+                <div className="flex justify-between items-center">
+                  <label htmlFor="gridLayers">Depth (layers)</label>
+                  <input type="number" name="gridLayers" id="gridLayers" min="2" max="6"
+                         value={localSettings.gridLayers} onChange={handleChange}
+                         className="w-20 p-2 bg-gray-700 rounded" />
+                </div>
+                <div className="flex justify-between items-center">
+                  <label htmlFor="spatial3dRotate">Rotate the box</label>
+                  <input type="checkbox" name="spatial3dRotate" id="spatial3dRotate"
+                         checked={localSettings.spatial3dRotate} onChange={handleChange}
+                         className="w-5 h-5 accent-cyan-500" />
+                </div>
+                {localSettings.spatial3dRotate && (
+                  <div className="flex justify-between items-center">
+                    <label htmlFor="spatial3dRotateSeconds">Seconds per turn</label>
+                    <input type="number" name="spatial3dRotateSeconds"
+                           id="spatial3dRotateSeconds" min="4" max="120"
+                           value={localSettings.spatial3dRotateSeconds}
+                           onChange={handleChange}
+                           className="w-20 p-2 bg-gray-700 rounded" />
+                  </div>
+                )}
+              </>
             )}
           </>
         )}

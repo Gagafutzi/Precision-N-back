@@ -9,7 +9,25 @@ function getStorageValue<T>(key: string, defaultValue: T): T {
   const saved = localStorage.getItem(key);
   if (saved) {
     try {
-      return JSON.parse(saved);
+      const parsed = JSON.parse(saved);
+      /*
+       * Stored settings are laid over the defaults, not used in place of them.
+       *
+       * Returned verbatim, a settings object written before a setting existed
+       * simply lacks it — so the new key reads `undefined` for everyone who has
+       * ever opened the app, and only behaves because `undefined` happens to be
+       * falsy. A setting whose default is a number breaks outright: `undefined`
+       * reaches the arithmetic and the value becomes NaN.
+       *
+       * Objects only. `performanceHistory` is an array, and spreading one into
+       * an object turns it into `{0: …, 1: …}` and loses every array method.
+       */
+      const isPlain = (v: unknown): v is Record<string, unknown> =>
+        typeof v === 'object' && v !== null && !Array.isArray(v);
+      if (isPlain(parsed) && isPlain(defaultValue)) {
+        return { ...defaultValue, ...parsed } as T;
+      }
+      return parsed as T;
     } catch (error) {
       console.error('Error parsing JSON from localStorage', error);
       return defaultValue;

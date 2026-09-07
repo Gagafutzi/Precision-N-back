@@ -38,6 +38,38 @@ function playSyllable(index: number) {
 }
 import ShapeDisplay from './ShapeDisplay';
 
+/**
+ * How far the box is turned away from the viewer.
+ *
+ * Face-on, a stack of parallel planes gives no depth cue worth the name: they
+ * differ only by the size perspective lends them, which near the middle of the
+ * board is a percent or two. Turned, the layers stagger across the screen and
+ * the near one plainly overlaps the far one — which is the whole point of
+ * having layers.
+ *
+ * Enough to separate them, not so much that the far layer is edge-on and its
+ * cells become unreadable slivers.
+ */
+const TILT_X = -22;
+const TILT_Y = 26;
+
+/** Gap between layers, in svmin. Wide enough that turning does not stack them. */
+const LAYER_GAP = 11;
+
+/**
+ * One turn of the box, about its own vertical axis.
+ *
+ * Keyed off the tilt so the box starts and ends where the static view sits: a
+ * rotation that snapped to a different attitude at the start would make the two
+ * modes look like two different boards.
+ */
+const SPIN_KEYFRAMES = `
+@keyframes qb-spin {
+  from { transform: rotateX(${TILT_X}deg) rotateY(${TILT_Y}deg); }
+  to   { transform: rotateX(${TILT_X}deg) rotateY(${TILT_Y + 360}deg); }
+}`;
+
+
 declare namespace Tone {
   interface Synth {
     toDestination(): this;
@@ -553,9 +585,10 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
         <div className="text-lg font-mono">Trial: {trialNumber} / {totalTrials}</div>
       </div>
       
+      {settings.spatial3dEnabled && <style>{SPIN_KEYFRAMES}</style>}
       <div
         ref={gameBoardRef}
-        className="relative w-full bg-gray-900 rounded-lg mb-6 shadow-inner overflow-hidden"
+        className="relative w-full bg-gray-900 rounded-lg mb-6 shadow-inner"
         style={{
           /* The flat grid lines belong to the 2D board. In 3D each layer draws
              its own, or the fixed backdrop reads as a plane the cells float in
@@ -563,22 +596,52 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
           ...(settings.spatial3dEnabled ? {} : gridStyle),
           aspectRatio: `${gridCols} / ${gridRows}`,
           ...(settings.spatial3dEnabled
-            ? { perspective: '60svmin', perspectiveOrigin: 'center center' }
-            : {}),
+            ? {
+                /* Nearer than before: a distant camera flattens the box back
+                   towards the face-on view this is meant to get away from. */
+                perspective: '90svmin',
+                perspectiveOrigin: 'center center',
+                /* A turned box reaches outside the board's own rectangle, and
+                   clipping it cuts the near corners off — which reads as the
+                   layers being cropped rather than as depth. */
+                overflow: 'visible',
+              }
+            : { overflow: 'hidden' }),
         }}
       >
         {settings.spatial3dEnabled && (
-          /* One plane per layer, spaced along Z. Perspective does the rest:
-             a nearer layer is drawn larger, and that size difference IS the
-             depth cue, so nothing has to be scaled by hand.
-
+          /* One plane per layer, spaced along Z, inside a box that is *turned*.
+     
+             Face-on, this showed no depth at all, which is the whole complaint:
+             a stack of parallel planes viewed straight down its own axis differs
+             only by the size perspective gives it, and at the middle of the
+             board that is a percent or two. Nothing about the picture says which
+             layer you are looking at.
+     
+             Tilting is what makes depth visible — turned away from the viewer,
+             the layers stagger across the screen and the near one plainly
+             overlaps the far one. Rotating is a separate thing on top: it stops
+             a screen position from identifying a cell at all, so the position
+             has to be read against the box rather than against the window.
+     
              The technique — a perspective container over preserve-3d planes —
              is the one used by the Quad Box project (MIT, Copyright (c) 2025
              The Quad Box Project Contributors), reimplemented here because that
              project is Svelte and this one is React. */
-          <div className="absolute inset-0" style={{ transformStyle: 'preserve-3d' }}>
+          <div
+            className="absolute inset-0"
+            style={{
+              transformStyle: 'preserve-3d',
+              transform: `rotateX(${TILT_X}deg) rotateY(${TILT_Y}deg)`,
+              animation: settings.spatial3dRotate
+                ? `qb-spin ${Math.max(4, settings.spatial3dRotateSeconds)}s linear infinite`
+                : undefined,
+            }}
+          >
             {Array.from({ length: layers }, (_, l) => {
-              const z = (l - (layers - 1) / 2) * 7;
+              /* Spread wide enough that neighbouring layers do not sit on top of
+                 one another once the box is turned. */
+              const z = (l - (layers - 1) / 2) * LAYER_GAP;
               const isNear = currentEvent ? l === currentEvent.spatial.layer : false;
               return (
                 <div
@@ -590,8 +653,10 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
                     transformStyle: 'preserve-3d',
                     /* Layers behind the lit one are dimmed so the stack reads as
                        depth rather than as overlapping grids. */
-                    opacity: isStimulusVisible && isNear ? 1 : 0.35,
-                    border: '1px solid rgba(128,128,128,0.12)',
+                    opacity: isStimulusVisible && isNear ? 1 : 0.3,
+                    border: '1px solid rgba(128,128,128,0.18)',
+                    background: isStimulusVisible && isNear
+                      ? 'rgba(34,211,238,0.05)' : 'transparent',
                   }}
                 >
                   {isStimulusVisible && currentEvent && isNear && (
@@ -600,7 +665,14 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
                       style={{
                         left: `${(currentEvent.spatial.col + 0.5) / gridCols * 100}%`,
                         top: `${(currentEvent.spatial.row + 0.5) / gridRows * 100}%`,
-                        transform: 'translate(-50%, -50%)',
+                        /* Turned back to face the viewer, so the shape and its
+                           colours stay readable however the box is standing. The
+                           *position* still moves with the box, which is the
+                           channel being trained; the shape is a different one and
+                           should not be foreshortened into a sliver. */
+                        transform: `translate(-50%, -50%)`
+                          + ` rotateY(${-TILT_Y}deg) rotateX(${-TILT_X}deg)`,
+                        transformStyle: 'preserve-3d',
                         width: `${stimulusSize}px`,
                         height: `${stimulusSize}px`,
                       }}

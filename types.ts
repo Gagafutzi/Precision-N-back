@@ -71,6 +71,17 @@ export type Settings = {
      and not a harder setting of the same one. */
   spatial3dEnabled: boolean;
   gridLayers: number;
+  /**
+   * Turn the box, so screen position stops identifying a cell.
+   *
+   * Off, the box is still *tilted* — a stack of planes seen face-on separates
+   * only by the size difference perspective gives them, which at the middle of
+   * the board is nearly nothing. Tilting is what makes depth visible at all;
+   * rotating is what stops it being memorised as a flat picture.
+   */
+  spatial3dRotate: boolean;
+  /** Seconds for one full turn. Lower is faster. */
+  spatial3dRotateSeconds: number;
   audioThreshold: number;
   colorThreshold: number;
   shapeThreshold: number;
@@ -109,6 +120,8 @@ export type PerformanceRecord = {
        reader must be able to tell "2D" from "not recorded". */
     spatial3dEnabled?: boolean;
     gridLayers?: number;
+    spatial3dRotate?: boolean;
+    spatial3dRotateSeconds?: number;
   };
   score: Score;
   accuracy?: number; // Optional accuracy field
