@@ -39,35 +39,31 @@ function playSyllable(index: number) {
 import ShapeDisplay from './ShapeDisplay';
 
 /**
- * How far the box is turned away from the viewer.
+ * The box, drawn as a projected wireframe rather than as stacked CSS planes.
  *
- * Face-on, a stack of parallel planes gives no depth cue worth the name: they
- * differ only by the size perspective lends them, which near the middle of the
- * board is a percent or two. Turned, the layers stagger across the screen and
- * the near one plainly overlaps the far one — which is the whole point of
- * having layers.
+ * Planes parallel to the screen were the mistake: seen down their own axis they
+ * differ only by the size perspective lends them, so there was no depth to read
+ * — and once tilted they escaped the board's rectangle instead of sitting in it.
  *
- * Enough to separate them, not so much that the far layer is edge-on and its
- * cells become unreadable slivers.
+ * A lattice projected by hand puts every line where it is meant to be, which is
+ * what the Quad Box project does (MIT, Copyright (c) 2025 The Quad Box Project
+ * Contributors, github.com/soamsy/quad-box) and why its cube reads as a cube.
  */
-const TILT_X = -22;
-const TILT_Y = 26;
+const PITCH = -0.42;        // radians, tipped so the top face shows
+const CAMERA = 3.4;         // eye distance in cube widths; smaller is wider-angle
+const CUBE_FILL = 0.78;     // share of the viewBox the cube spans at rest
 
-/** Gap between layers, in svmin. Wide enough that turning does not stack them. */
-const LAYER_GAP = 11;
-
-/**
- * One turn of the box, about its own vertical axis.
- *
- * Keyed off the tilt so the box starts and ends where the static view sits: a
- * rotation that snapped to a different attitude at the start would make the two
- * modes look like two different boards.
- */
-const SPIN_KEYFRAMES = `
-@keyframes qb-spin {
-  from { transform: rotateX(${TILT_X}deg) rotateY(${TILT_Y}deg); }
-  to   { transform: rotateX(${TILT_X}deg) rotateY(${TILT_Y + 360}deg); }
-}`;
+/** A lattice node, rotated by yaw then pitch and divided for perspective. */
+function project(x: number, y: number, z: number, yaw: number) {
+    const cy = Math.cos(yaw), sy = Math.sin(yaw);
+    const rx = x * cy + z * sy;
+    const rz = z * cy - x * sy;
+    const cp = Math.cos(PITCH), sp = Math.sin(PITCH);
+    const ry = y * cp - rz * sp;
+    const dz = rz * cp + y * sp;
+    const scale = CAMERA / (CAMERA - dz);
+    return { x: 50 + rx * scale * 50 * CUBE_FILL, y: 50 + ry * scale * 50 * CUBE_FILL, scale };
+}
 
 
 declare namespace Tone {
@@ -138,6 +134,29 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   /* Depth is one layer deep unless the 3D mode is on, so every position is a
      three-part coordinate and nothing downstream needs to branch. */
   const layers = settings.spatial3dEnabled ? Math.max(2, settings.gridLayers) : 1;
+
+  /**
+   * Which way the box is facing, in radians.
+   *
+   * A frame loop rather than a CSS animation: the lattice is projected in
+   * JavaScript, so the angle has to be a value this component can read. It also
+   * means the box holds its attitude when rotation is switched off, instead of
+   * snapping back to the start.
+   */
+  const [yaw, setYaw] = useState(0.55);
+  useEffect(() => {
+    if (!settings.spatial3dEnabled || !settings.spatial3dRotate) return;
+    const perMs = (2 * Math.PI) / (Math.max(4, settings.spatial3dRotateSeconds) * 1000);
+    let frame = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      setYaw(y => y + (now - last) * perMs);
+      last = now;
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [settings.spatial3dEnabled, settings.spatial3dRotate, settings.spatial3dRotateSeconds]);
   const { audioThreshold, colorThreshold, shapeThreshold } = settings;
   
   const stimulusDuration = 500;
@@ -585,7 +604,6 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
         <div className="text-lg font-mono">Trial: {trialNumber} / {totalTrials}</div>
       </div>
       
-      {settings.spatial3dEnabled && <style>{SPIN_KEYFRAMES}</style>}
       <div
         ref={gameBoardRef}
         className="relative w-full bg-gray-900 rounded-lg mb-6 shadow-inner"
@@ -594,106 +612,76 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
              its own, or the fixed backdrop reads as a plane the cells float in
              front of. */
           ...(settings.spatial3dEnabled ? {} : gridStyle),
-          aspectRatio: `${gridCols} / ${gridRows}`,
-          ...(settings.spatial3dEnabled
-            ? {
-                /* Nearer than before: a distant camera flattens the box back
-                   towards the face-on view this is meant to get away from. */
-                perspective: '90svmin',
-                perspectiveOrigin: 'center center',
-                /* A turned box reaches outside the board's own rectangle, and
-                   clipping it cuts the near corners off — which reads as the
-                   layers being cropped rather than as depth. */
-                overflow: 'visible',
-              }
-            : { overflow: 'hidden' }),
+          aspectRatio: settings.spatial3dEnabled ? '1 / 1' : `${gridCols} / ${gridRows}`,
+          overflow: 'hidden',
         }}
       >
-        {settings.spatial3dEnabled && (
-          /* One plane per layer, spaced along Z, inside a box that is *turned*.
-     
-             Face-on, this showed no depth at all, which is the whole complaint:
-             a stack of parallel planes viewed straight down its own axis differs
-             only by the size perspective gives it, and at the middle of the
-             board that is a percent or two. Nothing about the picture says which
-             layer you are looking at.
-     
-             Tilting is what makes depth visible — turned away from the viewer,
-             the layers stagger across the screen and the near one plainly
-             overlaps the far one. Rotating is a separate thing on top: it stops
-             a screen position from identifying a cell at all, so the position
-             has to be read against the box rather than against the window.
-     
-             The technique — a perspective container over preserve-3d planes —
-             is the one used by the Quad Box project (MIT, Copyright (c) 2025
-             The Quad Box Project Contributors), reimplemented here because that
-             project is Svelte and this one is React. */
-          <div
-            className="absolute inset-0"
-            style={{
-              transformStyle: 'preserve-3d',
-              transform: `rotateX(${TILT_X}deg) rotateY(${TILT_Y}deg)`,
-              animation: settings.spatial3dRotate
-                ? `qb-spin ${Math.max(4, settings.spatial3dRotateSeconds)}s linear infinite`
-                : undefined,
-            }}
-          >
-            {Array.from({ length: layers }, (_, l) => {
-              /* Spread wide enough that neighbouring layers do not sit on top of
-                 one another once the box is turned. */
-              const z = (l - (layers - 1) / 2) * LAYER_GAP;
-              const isNear = currentEvent ? l === currentEvent.spatial.layer : false;
-              return (
-                <div
-                  key={l}
-                  className="absolute inset-0"
-                  style={{
-                    ...gridStyle,
-                    transform: `translateZ(${z}svmin)`,
-                    transformStyle: 'preserve-3d',
-                    /* Layers behind the lit one are dimmed so the stack reads as
-                       depth rather than as overlapping grids. */
-                    opacity: isStimulusVisible && isNear ? 1 : 0.3,
-                    border: '1px solid rgba(128,128,128,0.18)',
-                    background: isStimulusVisible && isNear
-                      ? 'rgba(34,211,238,0.05)' : 'transparent',
-                  }}
-                >
-                  {isStimulusVisible && currentEvent && isNear && (
-                    <div
-                      className="absolute"
-                      style={{
-                        left: `${(currentEvent.spatial.col + 0.5) / gridCols * 100}%`,
-                        top: `${(currentEvent.spatial.row + 0.5) / gridRows * 100}%`,
-                        /* Turned back to face the viewer, so the shape and its
-                           colours stay readable however the box is standing. The
-                           *position* still moves with the box, which is the
-                           channel being trained; the shape is a different one and
-                           should not be foreshortened into a sliver. */
-                        transform: `translate(-50%, -50%)`
-                          + ` rotateY(${-TILT_Y}deg) rotateX(${-TILT_X}deg)`,
-                        transformStyle: 'preserve-3d',
-                        width: `${stimulusSize}px`,
-                        height: `${stimulusSize}px`,
-                      }}
-                    >
-                      <ShapeDisplay
-                        shape={currentEvent.shape}
-                        hues={currentEvent.hues}
-                        size={stimulusSize}
-                        colorEnabled={settings.colorEnabled}
-                        shapeEnabled={settings.shapeEnabled}
-                        colorPattern={settings.colorPattern}
-                        bubbleData={currentEvent.bubbleData}
-                        topoData={currentEvent.topoData}
-                      />
-                    </div>
-                  )}
+        {settings.spatial3dEnabled && (() => {
+          /* Nodes run 0..n, so a 3-cell axis has 4 of them. Coordinates are
+             centred on the origin and scaled to the unit cube, which is what
+             keeps the box the same size however many cells an axis has. */
+          const at = (i: number, n: number) => (n === 0 ? 0 : i / n - 0.5);
+          const lines: Array<[number, number, number, number, number]> = [];
+          const push = (a: any, b: any) =>
+            lines.push([a.x, a.y, b.x, b.y, Math.min(a.scale, b.scale)]);
+
+          for (let r = 0; r <= gridRows; r++)
+            for (let l = 0; l <= layers; l++)
+              push(project(at(0, gridCols), at(r, gridRows), at(l, layers), yaw),
+                   project(at(gridCols, gridCols), at(r, gridRows), at(l, layers), yaw));
+          for (let c = 0; c <= gridCols; c++)
+            for (let l = 0; l <= layers; l++)
+              push(project(at(c, gridCols), at(0, gridRows), at(l, layers), yaw),
+                   project(at(c, gridCols), at(gridRows, gridRows), at(l, layers), yaw));
+          for (let c = 0; c <= gridCols; c++)
+            for (let r = 0; r <= gridRows; r++)
+              push(project(at(c, gridCols), at(r, gridRows), at(0, layers), yaw),
+                   project(at(c, gridCols), at(r, gridRows), at(layers, layers), yaw));
+
+          const cell = currentEvent
+            ? project(at(currentEvent.spatial.col + 0.5, gridCols),
+                      at(currentEvent.spatial.row + 0.5, gridRows),
+                      at(currentEvent.spatial.layer + 0.5, layers), yaw)
+            : null;
+
+          return (
+            <>
+              <svg viewBox="0 0 100 100" preserveAspectRatio="none"
+                   className="absolute inset-0 w-full h-full">
+                {lines.map(([x1, y1, x2, y2, near], i) => (
+                  /* Nearer edges brighter, which is the other depth cue besides
+                     the projection itself. */
+                  <line key={i} x1={x1} y1={y1} x2={x2} y2={y2}
+                        stroke="rgba(200,220,255,0.55)"
+                        strokeOpacity={0.25 + 0.75 * Math.min(1, (near - 0.8) * 2.2)}
+                        strokeWidth={0.18} vectorEffect="non-scaling-stroke" />
+                ))}
+              </svg>
+              {isStimulusVisible && currentEvent && cell && (
+                <div className="absolute"
+                     style={{
+                       left: `${cell.x}%`, top: `${cell.y}%`,
+                       transform: 'translate(-50%, -50%)',
+                       /* Sized by its own depth, so a cell at the back is
+                          smaller — the cue the flat stack never gave. */
+                       width: `${stimulusSize * cell.scale}px`,
+                       height: `${stimulusSize * cell.scale}px`,
+                     }}>
+                  <ShapeDisplay
+                    shape={currentEvent.shape}
+                    hues={currentEvent.hues}
+                    size={stimulusSize * cell.scale}
+                    colorEnabled={settings.colorEnabled}
+                    shapeEnabled={settings.shapeEnabled}
+                    colorPattern={settings.colorPattern}
+                    bubbleData={currentEvent.bubbleData}
+                    topoData={currentEvent.topoData}
+                  />
                 </div>
-              );
-            })}
-          </div>
-        )}
+              )}
+            </>
+          );
+        })()}
         {devMode && (
           <div className="absolute top-2 left-2 px-2 py-1 bg-yellow-500/20 text-yellow-300 text-xs font-mono rounded z-10">
             {devLureInfo}
