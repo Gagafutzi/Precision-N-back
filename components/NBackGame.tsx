@@ -120,7 +120,8 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   const [rot, setRot] = useState<Rot>(REST_ROT);
   useEffect(() => {
     if (!settings.spatial3dEnabled || !settings.spatial3dRotate) return;
-    const perMs = (2 * Math.PI) / (Math.max(4, settings.spatial3dRotateSeconds) * 1000);
+    const seconds = Math.min(500, Math.max(4, settings.spatial3dRotateSeconds || 24));
+    const perMs = (2 * Math.PI) / (seconds * 1000);
     let frame = 0;
     let last = performance.now();
     const tick = (now: number) => {

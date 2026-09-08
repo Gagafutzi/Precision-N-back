@@ -142,12 +142,12 @@ const SettingsComponent: React.FC<SettingsProps> = ({ settings, onSave, onBack }
                 </div>
                 {localSettings.spatial3dRotate && (
                   <div className="flex justify-between items-center">
-                    <label htmlFor="spatial3dRotateSeconds">Seconds per turn</label>
+                    <label htmlFor="spatial3dRotateSeconds">Seconds per turn (4-500)</label>
                     <input type="number" name="spatial3dRotateSeconds"
-                           id="spatial3dRotateSeconds" min="4" max="120"
+                           id="spatial3dRotateSeconds" min="4" max="500" step="5"
                            value={localSettings.spatial3dRotateSeconds}
                            onChange={handleChange}
-                           className="w-20 p-2 bg-gray-700 rounded" />
+                           className="w-24 p-2 bg-gray-700 rounded" />
                   </div>
                 )}
               </>
