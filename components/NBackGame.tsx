@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, useId } from 'react';
 import { NBackEvent, Score, Settings, Shape, Modality } from '../types';
 import { SYLLABLES, SYLLABLE_AUDIO } from '../syllableAudio';
 
@@ -36,35 +36,8 @@ function playSyllable(index: number) {
   src.connect(g).connect(sylCtx.destination);
   src.start();
 }
-import ShapeDisplay from './ShapeDisplay';
-
-/**
- * The box, drawn as a projected wireframe rather than as stacked CSS planes.
- *
- * Planes parallel to the screen were the mistake: seen down their own axis they
- * differ only by the size perspective lends them, so there was no depth to read
- * — and once tilted they escaped the board's rectangle instead of sitting in it.
- *
- * A lattice projected by hand puts every line where it is meant to be, which is
- * what the Quad Box project does (MIT, Copyright (c) 2025 The Quad Box Project
- * Contributors, github.com/soamsy/quad-box) and why its cube reads as a cube.
- */
-const PITCH = -0.42;        // radians, tipped so the top face shows
-const CAMERA = 3.4;         // eye distance in cube widths; smaller is wider-angle
-const CUBE_FILL = 0.78;     // share of the viewBox the cube spans at rest
-
-/** A lattice node, rotated by yaw then pitch and divided for perspective. */
-function project(x: number, y: number, z: number, yaw: number) {
-    const cy = Math.cos(yaw), sy = Math.sin(yaw);
-    const rx = x * cy + z * sy;
-    const rz = z * cy - x * sy;
-    const cp = Math.cos(PITCH), sp = Math.sin(PITCH);
-    const ry = y * cp - rz * sp;
-    const dz = rz * cp + y * sp;
-    const scale = CAMERA / (CAMERA - dz);
-    return { x: 50 + rx * scale * 50 * CUBE_FILL, y: 50 + ry * scale * 50 * CUBE_FILL, scale };
-}
-
+import ShapeDisplay, { ColorPatternSvg } from './ShapeDisplay';
+import { REST_ROT, Rot, at, latticeLines, prismFaces } from './box3d';
 
 declare namespace Tone {
   interface Synth {
@@ -136,22 +109,27 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   const layers = settings.spatial3dEnabled ? Math.max(2, settings.gridLayers) : 1;
 
   /**
-   * Which way the box is facing, in radians.
+   * How the box is turned, in radians on each axis.
    *
-   * A frame loop rather than a CSS animation: the lattice is projected in
-   * JavaScript, so the angle has to be a value this component can read. It also
-   * means the box holds its attitude when rotation is switched off, instead of
-   * snapping back to the start.
+   * A frame loop rather than a CSS animation: the lattice is projected in this
+   * component, so the angles have to be values it can read. It also means the
+   * box holds its attitude when rotation is switched off, instead of snapping
+   * back to the start.
    */
-  const [yaw, setYaw] = useState(0.55);
+  const clipBase = useId();
+  const [rot, setRot] = useState<Rot>(REST_ROT);
   useEffect(() => {
     if (!settings.spatial3dEnabled || !settings.spatial3dRotate) return;
     const perMs = (2 * Math.PI) / (Math.max(4, settings.spatial3dRotateSeconds) * 1000);
     let frame = 0;
     let last = performance.now();
     const tick = (now: number) => {
-      setYaw(y => y + (now - last) * perMs);
+      const d = (now - last) * perMs;
       last = now;
+      /* All three axes at once, the way Quad Box tumbles its scene: turning on
+         one axis alone lets the box settle into a view that hides a whole
+         dimension. */
+      setRot(r => ({ x: r.x + d, y: r.y + d, z: r.z + d }));
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -571,7 +549,7 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   };
 
   const getButtonClass = (modality: Modality) => {
-    const baseClasses = 'py-4 px-6 text-xl font-bold text-white rounded-lg transition-all duration-150';
+    const baseClasses = 'py-3 px-4 text-lg font-bold text-white rounded-lg transition-all duration-150 w-full';
     const defaultClasses = 'bg-gray-600 hover:bg-gray-500';
 
     switch (buttonHighlights[modality]) {
@@ -597,89 +575,114 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   // Fix: Explicitly type accumulator and value in reduce to prevent type inference issues with Object.values.
   const totalHits = Object.values(score.hits).reduce((sum: number, h: number) => sum + h, 0);
 
+  /* The board is square in 3D and cell-shaped in 2D; either way it is capped by
+     the viewport's height so it can be as large as the screen allows without
+     pushing the controls off the bottom. */
+  const boardAspect = settings.spatial3dEnabled ? 1 : gridCols / gridRows;
+  const responseButtons = [
+    settings.spatialEnabled && <button key="spatial" onClick={() => handleUserResponse('spatial')} className={getButtonClass('spatial')}>Position <span className="text-xs opacity-70">(A)</span></button>,
+    settings.audioEnabled && <button key="audio" onClick={() => handleUserResponse('audio')} className={getButtonClass('audio')}>Audio <span className="text-xs opacity-70">(L)</span></button>,
+    settings.colorEnabled && <button key="color" onClick={() => handleUserResponse('color')} className={getButtonClass('color')}>Color <span className="text-xs opacity-70">(F)</span></button>,
+    settings.shapeEnabled && <button key="shape" onClick={() => handleUserResponse('shape')} className={getButtonClass('shape')}>Shape <span className="text-xs opacity-70">(J)</span></button>,
+    settings.syllableEnabled && <button key="syllable" onClick={() => handleUserResponse('syllable')} className={getButtonClass('syllable')}>Syllable <span className="text-xs opacity-70">(K)</span></button>,
+  ].filter(Boolean);
+
   return (
-    <div className="flex flex-col items-center justify-center p-4 sm:p-8 bg-gray-800 rounded-xl shadow-2xl w-full max-w-4xl">
-      <div className="w-full flex justify-between items-center mb-4">
+    <div className="flex flex-col p-3 sm:p-5 bg-gray-800 rounded-xl shadow-2xl w-full max-w-6xl">
+      <div className="w-full flex justify-between items-center mb-3">
         <h2 className="text-xl md:text-2xl font-bold text-primary">{getGameTitle()}</h2>
         <div className="text-lg font-mono">Trial: {trialNumber} / {totalTrials}</div>
       </div>
-      
+
+      {/* The controls sit beside the board rather than under it, so the box gets
+          the height of the window instead of what is left over. */}
+      <div className="w-full flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-6">
       <div
         ref={gameBoardRef}
-        className="relative w-full bg-gray-900 rounded-lg mb-6 shadow-inner"
+        className="relative bg-gray-900 rounded-lg shadow-inner mx-auto lg:flex-1 lg:min-w-0"
         style={{
-          /* The flat grid lines belong to the 2D board. In 3D each layer draws
+          /* The flat grid lines belong to the 2D board. In 3D the lattice draws
              its own, or the fixed backdrop reads as a plane the cells float in
              front of. */
           ...(settings.spatial3dEnabled ? {} : gridStyle),
-          aspectRatio: settings.spatial3dEnabled ? '1 / 1' : `${gridCols} / ${gridRows}`,
+          width: '100%',
+          maxWidth: `min(100%, ${(76 * boardAspect).toFixed(1)}vh)`,
+          aspectRatio: `${boardAspect}`,
           overflow: 'hidden',
         }}
       >
         {settings.spatial3dEnabled && (() => {
-          /* Nodes run 0..n, so a 3-cell axis has 4 of them. Coordinates are
-             centred on the origin and scaled to the unit cube, which is what
-             keeps the box the same size however many cells an axis has. */
-          const at = (i: number, n: number) => (n === 0 ? 0 : i / n - 0.5);
-          const lines: Array<[number, number, number, number, number]> = [];
-          const push = (a: any, b: any) =>
-            lines.push([a.x, a.y, b.x, b.y, Math.min(a.scale, b.scale)]);
+          const lines = latticeLines(gridCols, gridRows, layers, rot);
 
-          for (let r = 0; r <= gridRows; r++)
-            for (let l = 0; l <= layers; l++)
-              push(project(at(0, gridCols), at(r, gridRows), at(l, layers), yaw),
-                   project(at(gridCols, gridCols), at(r, gridRows), at(l, layers), yaw));
-          for (let c = 0; c <= gridCols; c++)
-            for (let l = 0; l <= layers; l++)
-              push(project(at(c, gridCols), at(0, gridRows), at(l, layers), yaw),
-                   project(at(c, gridCols), at(gridRows, gridRows), at(l, layers), yaw));
-          for (let c = 0; c <= gridCols; c++)
-            for (let r = 0; r <= gridRows; r++)
-              push(project(at(c, gridCols), at(r, gridRows), at(0, layers), yaw),
-                   project(at(c, gridCols), at(r, gridRows), at(layers, layers), yaw));
+          /* One cell across the tightest axis is the room the stimulus has, so
+             ballSize means the same thing here as it does on the flat board. */
+          const span = 1 / Math.max(gridCols, gridRows, layers);
+          const radius = ballSize * 0.5 * span;
 
-          const cell = currentEvent
-            ? project(at(currentEvent.spatial.col + 0.5, gridCols),
-                      at(currentEvent.spatial.row + 0.5, gridRows),
-                      at(currentEvent.spatial.layer + 0.5, layers), yaw)
-            : null;
+          const centre = currentEvent ? {
+            x: at(currentEvent.spatial.col + 0.5, gridCols),
+            y: at(currentEvent.spatial.row + 0.5, gridRows),
+            z: at(currentEvent.spatial.layer + 0.5, layers),
+          } : null;
+
+          const show = isStimulusVisible && currentEvent && centre;
+          const faces = show ? prismFaces({
+            centre: centre!,
+            /* Without the shape modality every stimulus is the same solid, so a
+               ring of equal radii — a cylinder — stands in for the circle the
+               flat board draws. */
+            radii: settings.shapeEnabled
+              ? currentEvent!.shape.vertices.map(v => v.radius)
+              : Array.from({ length: 24 }, () => 1),
+            radius,
+            depth: radius * 1.1,
+            rot,
+          }) : [];
+
+          /* Lattice edges behind the stimulus are drawn before it and the rest
+             after, so the box passes in front of the solid as it turns. */
+          const mid = faces.length ? (faces[0].depth + faces[faces.length - 1].depth) / 2 : Infinity;
+          const edge = (l: typeof lines[number], i: number) => (
+            <line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2}
+                  stroke="rgba(200,220,255,0.55)"
+                  strokeOpacity={0.22 + 0.78 * Math.min(1, Math.max(0, (l.near - 0.8) * 2.2))}
+                  strokeWidth={0.16} vectorEffect="non-scaling-stroke" />
+          );
 
           return (
-            <>
-              <svg viewBox="0 0 100 100" preserveAspectRatio="none"
-                   className="absolute inset-0 w-full h-full">
-                {lines.map(([x1, y1, x2, y2, near], i) => (
-                  /* Nearer edges brighter, which is the other depth cue besides
-                     the projection itself. */
-                  <line key={i} x1={x1} y1={y1} x2={x2} y2={y2}
-                        stroke="rgba(200,220,255,0.55)"
-                        strokeOpacity={0.25 + 0.75 * Math.min(1, (near - 0.8) * 2.2)}
-                        strokeWidth={0.18} vectorEffect="non-scaling-stroke" />
-                ))}
-              </svg>
-              {isStimulusVisible && currentEvent && cell && (
-                <div className="absolute"
-                     style={{
-                       left: `${cell.x}%`, top: `${cell.y}%`,
-                       transform: 'translate(-50%, -50%)',
-                       /* Sized by its own depth, so a cell at the back is
-                          smaller — the cue the flat stack never gave. */
-                       width: `${stimulusSize * cell.scale}px`,
-                       height: `${stimulusSize * cell.scale}px`,
-                     }}>
-                  <ShapeDisplay
-                    shape={currentEvent.shape}
-                    hues={currentEvent.hues}
-                    size={stimulusSize * cell.scale}
-                    colorEnabled={settings.colorEnabled}
-                    shapeEnabled={settings.shapeEnabled}
-                    colorPattern={settings.colorPattern}
-                    bubbleData={currentEvent.bubbleData}
-                    topoData={currentEvent.topoData}
-                  />
-                </div>
-              )}
-            </>
+            <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full">
+              <defs>
+                {faces.map((f, i) => f.kind === 'cap' && settings.colorEnabled ? (
+                  <clipPath key={i} id={`${clipBase}-${i}`}><polygon points={f.points} /></clipPath>
+                ) : null)}
+              </defs>
+              {lines.filter(l => l.depth <= mid).map(edge)}
+              {faces.map((f, i) => (
+                <g key={i}>
+                  {f.kind === 'cap' && settings.colorEnabled ? (
+                    <g clipPath={`url(#${clipBase}-${i})`}>
+                      <g transform={`translate(${f.box.x} ${f.box.y}) scale(${f.box.s / 100})`}>
+                        <ColorPatternSvg
+                          hues={currentEvent!.hues}
+                          size={100}
+                          colorPattern={settings.colorPattern}
+                          bubbleData={currentEvent!.bubbleData}
+                          topoData={currentEvent!.topoData}
+                        />
+                      </g>
+                    </g>
+                  ) : (
+                    <polygon points={f.points} fill={settings.colorEnabled
+                      ? `hsl(${currentEvent!.hues[f.index % 3]}, 80%, 45%)`
+                      : 'var(--color-primary)'} />
+                  )}
+                  {/* One darkening pass over the finished face, so a pattern and
+                      a flat fill take the same light. */}
+                  <polygon points={f.points} fill="#000" opacity={1 - f.light} />
+                </g>
+              ))}
+              {lines.filter(l => l.depth > mid).map(edge)}
+            </svg>
           );
         })()}
         {devMode && (
@@ -715,15 +718,12 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-4 w-full max-w-lg mx-auto">
-        {settings.spatialEnabled && <button onClick={() => handleUserResponse('spatial')} className={getButtonClass('spatial')}>Position <span className="text-xs opacity-70">(A)</span></button>}
-        {settings.audioEnabled && <button onClick={() => handleUserResponse('audio')} className={getButtonClass('audio')}>Audio <span className="text-xs opacity-70">(L)</span></button>}
-        {settings.colorEnabled && <button onClick={() => handleUserResponse('color')} className={getButtonClass('color')}>Color <span className="text-xs opacity-70">(F)</span></button>}
-        {settings.shapeEnabled && <button onClick={() => handleUserResponse('shape')} className={getButtonClass('shape')}>Shape <span className="text-xs opacity-70">(J)</span></button>}
-        {settings.syllableEnabled && <button onClick={() => handleUserResponse('syllable')} className={getButtonClass('syllable')}>Syllable <span className="text-xs opacity-70">(K)</span></button>}
+        <div className="grid grid-cols-2 lg:flex lg:flex-col gap-3 w-full lg:w-52 shrink-0">
+          {responseButtons}
+        </div>
       </div>
 
-      <div className="mt-6 w-full flex justify-between items-center text-gray-400 font-mono">
+      <div className="mt-4 w-full flex justify-between items-center text-gray-400 font-mono">
         <button onClick={quitSession} className="px-4 py-2 bg-red-800 hover:bg-red-700 text-white font-bold rounded-lg text-sm">Quit</button>
         {feedbackEnabled && (
           <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-sm">

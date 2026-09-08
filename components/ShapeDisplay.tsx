@@ -13,20 +13,20 @@ interface ShapeDisplayProps {
   topoData?: { points: {x: number, y: number}[] }[];
 }
 
-const ShapeDisplay: React.FC<ShapeDisplayProps> = ({ shape, hues, size, colorEnabled, shapeEnabled, colorPattern, bubbleData, topoData }) => {
-  const uniqueClipId = useId();
-
-  // Define the shape polygon path if shape is enabled
-  const shapePoints = shapeEnabled ? shape.vertices.map((vertex, i) => {
-    const angle = (i / shape.vertices.length) * 2 * Math.PI - (Math.PI / 2);
-    const radius = (size / 2) * vertex.radius;
-    const x = size / 2 + radius * Math.cos(angle);
-    const y = size / 2 + radius * Math.sin(angle);
-    return `${x},${y}`;
-  }).join(' ') : '';
-  
-  // Define the color pattern elements
-  const renderColorPattern = () => {
+/**
+ * The colour pattern on its own, in a size x size box.
+ *
+ * Pulled out of ShapeDisplay so the 3D board can paint the same pattern onto a
+ * projected face, clipped to the face's own outline rather than to a square.
+ */
+export const ColorPatternSvg: React.FC<{
+  hues: [number, number, number];
+  size: number;
+  colorPattern: ColorPattern;
+  bubbleData?: { cx: number; cy: number; r: number; }[];
+  topoData?: { points: {x: number, y: number}[] }[];
+}> = ({ hues, size, colorPattern, bubbleData, topoData }) => {
+    const aztecPatternId = useId();
     const color1 = `hsl(${hues[0]}, 80%, 50%)`;
     const color2 = `hsl(${hues[1]}, 80%, 50%)`;
     const color3 = `hsl(${hues[2]}, 80%, 50%)`;
@@ -90,7 +90,6 @@ const ShapeDisplay: React.FC<ShapeDisplayProps> = ({ shape, hues, size, colorEna
         }
         return <>{bricks}</>;
       case 'aztec':
-        const aztecPatternId = useId();
         // Cleaner, less saturated background
         const darkBg = `hsl(${hues[1]}, 25%, 20%)`;
         
@@ -220,7 +219,21 @@ const ShapeDisplay: React.FC<ShapeDisplayProps> = ({ shape, hues, size, colorEna
           </>
         );
     }
-  };
+};
+
+const ShapeDisplay: React.FC<ShapeDisplayProps> = ({ shape, hues, size, colorEnabled, shapeEnabled, colorPattern, bubbleData, topoData }) => {
+  const uniqueClipId = useId();
+
+  // Define the shape polygon path if shape is enabled
+  const shapePoints = shapeEnabled ? shape.vertices.map((vertex, i) => {
+    const angle = (i / shape.vertices.length) * 2 * Math.PI - (Math.PI / 2);
+    const radius = (size / 2) * vertex.radius;
+    const x = size / 2 + radius * Math.cos(angle);
+    const y = size / 2 + radius * Math.sin(angle);
+    return `${x},${y}`;
+  }).join(' ') : '';
+  
+  // Define the color pattern elements
 
   // Main rendering logic based on which modalities are active
   if (colorEnabled && shapeEnabled) {
@@ -233,7 +246,7 @@ const ShapeDisplay: React.FC<ShapeDisplayProps> = ({ shape, hues, size, colorEna
           </clipPath>
         </defs>
         <g clipPath={`url(#${uniqueClipId})`}>
-          {renderColorPattern()}
+          <ColorPatternSvg hues={hues} size={size} colorPattern={colorPattern} bubbleData={bubbleData} topoData={topoData} />
         </g>
       </svg>
     );
@@ -241,7 +254,7 @@ const ShapeDisplay: React.FC<ShapeDisplayProps> = ({ shape, hues, size, colorEna
     // Only color enabled: pattern fills the square
     return (
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        {renderColorPattern()}
+        <ColorPatternSvg hues={hues} size={size} colorPattern={colorPattern} bubbleData={bubbleData} topoData={topoData} />
       </svg>
     );
   } else if (shapeEnabled) {
