@@ -555,7 +555,7 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   };
 
   const getButtonClass = (modality: Modality) => {
-    const baseClasses = 'py-3 px-4 text-lg font-bold text-white rounded-lg transition-all duration-150 w-full';
+    const baseClasses = 'py-3 px-2 sm:px-4 text-sm sm:text-base md:text-lg font-bold text-white rounded-lg transition-all duration-150 w-full';
     const defaultClasses = 'bg-gray-600 hover:bg-gray-500';
 
     switch (buttonHighlights[modality]) {
@@ -594,27 +594,33 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
      neither hand reaches across. */
   const leftButtons = responseButtons.slice(0, Math.ceil(responseButtons.length / 2));
   const rightButtons = responseButtons.slice(Math.ceil(responseButtons.length / 2));
-  const sideColumn = 'flex flex-row lg:flex-col gap-3 justify-center w-full lg:w-40 xl:w-44 shrink-0';
+  /* Always a column, at every width: the arrangement is what the hands learn,
+     so it should not depend on how wide the window happens to be. */
+  const sideColumn = 'flex flex-col gap-2 sm:gap-3 justify-center w-20 sm:w-28 md:w-36 lg:w-44 shrink-0';
 
   return (
-    <div className="flex flex-col p-2 sm:p-3 bg-gray-800 rounded-xl shadow-2xl w-full">
-      <div className="w-full flex justify-between items-center mb-2 px-1">
+    <div className="flex flex-col w-full h-full">
+      <div className="w-full flex justify-between items-center mb-1 px-1">
         <h2 className="text-xl md:text-2xl font-bold text-primary">{getGameTitle()}</h2>
         <div className="text-lg font-mono">Trial: {trialNumber} / {totalTrials}</div>
       </div>
 
-      <div className="w-full flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-5">
-        <div className={`${sideColumn} order-2 lg:order-1`}>{leftButtons}</div>
+      <div className="w-full flex flex-row items-center gap-2 sm:gap-4">
+        <div className={sideColumn}>{leftButtons}</div>
       <div
         ref={gameBoardRef}
-        className="relative bg-gray-900 rounded-lg shadow-inner mx-auto order-1 lg:order-2 lg:flex-1 lg:min-w-0"
+        /* No panel of its own in 3D: Quad Box's box sits on the page, and a
+           card behind it reads as a wall the cube is standing against. */
+        className={`relative mx-auto flex-1 min-w-0 ${settings.spatial3dEnabled ? '' : 'bg-gray-900 rounded-lg shadow-inner'}`}
         style={{
           /* The flat grid lines belong to the 2D board. In 3D the lattice draws
              its own, or the fixed backdrop reads as a plane the cells float in
              front of. */
           ...(settings.spatial3dEnabled ? {} : gridStyle),
           width: '100%',
-          maxWidth: `min(100%, ${(84 * boardAspect).toFixed(1)}vh)`,
+          /* The window's height less the header, the footer and the padding
+             around them — everything left over goes to the box. */
+          maxWidth: `min(100%, calc((100vh - 7rem) * ${boardAspect.toFixed(3)}))`,
           aspectRatio: `${boardAspect}`,
           overflow: 'hidden',
         }}
@@ -731,10 +737,10 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
         )}
       </div>
 
-        <div className={`${sideColumn} order-3`}>{rightButtons}</div>
+        <div className={sideColumn}>{rightButtons}</div>
       </div>
 
-      <div className="mt-2 w-full flex justify-between items-center text-gray-400 font-mono px-1">
+      <div className="mt-1 w-full flex justify-between items-center text-gray-400 font-mono px-1">
         <button onClick={quitSession} className="px-4 py-2 bg-red-800 hover:bg-red-700 text-white font-bold rounded-lg text-sm">Quit</button>
         {feedbackEnabled && (
           <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-sm">

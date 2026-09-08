@@ -276,7 +276,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <main className="min-h-screen w-full flex flex-col items-center justify-center p-4 bg-gray-900 font-sans">
+    <main className={`min-h-screen w-full flex flex-col items-center justify-center bg-gray-900 font-sans ${gameState === GameState.Playing ? "h-screen p-2" : "p-4"}`}>
       {renderContent()}
     </main>
   );

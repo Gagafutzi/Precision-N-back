@@ -10,14 +10,14 @@
  */
 
 export const CAMERA = 3.4;   // eye distance in cube widths; smaller is wider-angle
-export const TARGET = 48;    // half-extent the box is fitted to, of the 50 available
+export const TARGET = 49;    // half-extent the box is fitted to, of the 50 available
 
 /**
  * The scale a tumbling box has to use: its widest attitude, so it never clips.
  * The extremes are always the eight corners, whatever the cell counts, so this
  * is one number rather than one per grid.
  */
-export const WORST_FILL = 1.05;
+export const WORST_FILL = 1.094;
 
 /** Where the light sits, in view space. Screen y points down. */
 const LIGHT = { x: 0.30, y: -0.55, z: 0.78 };
