@@ -195,6 +195,15 @@ const SettingsComponent: React.FC<SettingsProps> = ({ settings, onSave, onBack }
           <input type="number" name="isi" id="isi" step="100" min="500" value={localSettings.isi} onChange={handleChange} className="w-24 p-2 bg-gray-700 rounded" />
         </div>
 
+        {/* Stimulus duration */}
+        <div className="flex justify-between items-center">
+          <label htmlFor="stimulusDuration">Stimulus Shown For (ms)</label>
+          <input type="number" name="stimulusDuration" id="stimulusDuration" step="100" min="100"
+                 max={Math.max(200, localSettings.isi - 100)}
+                 value={localSettings.stimulusDuration} onChange={handleChange}
+                 className="w-24 p-2 bg-gray-700 rounded" />
+        </div>
+
         {/* Variable ISI Toggle */}
         <div className="flex justify-between items-center pt-4 border-t border-gray-700">
           <label htmlFor="variableIsiEnabled">Enable Variable ISI</label>

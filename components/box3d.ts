@@ -9,8 +9,15 @@
  * rather than looked at, and nothing can wander outside the board.
  */
 
-export const CAMERA = 3.4;      // eye distance in cube widths; smaller is wider-angle
-export const CUBE_FILL = 1.05;  // fitted so a tumbling cube just fills the board
+export const CAMERA = 3.4;   // eye distance in cube widths; smaller is wider-angle
+export const TARGET = 48;    // half-extent the box is fitted to, of the 50 available
+
+/**
+ * The scale a tumbling box has to use: its widest attitude, so it never clips.
+ * The extremes are always the eight corners, whatever the cell counts, so this
+ * is one number rather than one per grid.
+ */
+export const WORST_FILL = 1.05;
 
 /** Where the light sits, in view space. Screen y points down. */
 const LIGHT = { x: 0.30, y: -0.55, z: 0.78 };
@@ -34,17 +41,36 @@ export function view(x: number, y: number, z: number, r: Rot): Vec3 {
 }
 
 /** View space into the 0..100 viewBox, divided for perspective. */
-export function toScreen(v: Vec3): Pt {
+export function toScreen(v: Vec3, fill: number): Pt {
     const scale = CAMERA / (CAMERA - v.z);
     return {
-        x: 50 + v.x * scale * 50 * CUBE_FILL,
-        y: 50 + v.y * scale * 50 * CUBE_FILL,
+        x: 50 + v.x * scale * 50 * fill,
+        y: 50 + v.y * scale * 50 * fill,
         z: v.z,
         scale,
     };
 }
 
-export const project = (x: number, y: number, z: number, r: Rot): Pt => toScreen(view(x, y, z, r));
+export const project = (x: number, y: number, z: number, r: Rot, fill: number): Pt =>
+    toScreen(view(x, y, z, r), fill);
+
+/**
+ * The scale that makes the box fill the board at one particular attitude.
+ *
+ * Worth doing because a box that is not turning has no worst case to reserve
+ * room for: fitting it to the attitude it is actually in is the difference
+ * between a box that sits in the middle of the board and one that is the board.
+ */
+export function fitFill(r: Rot, target = TARGET): number {
+    let extent = 0;
+    for (const x of [-0.5, 0.5])
+        for (const y of [-0.5, 0.5])
+            for (const z of [-0.5, 0.5]) {
+                const p = project(x, y, z, r, 1);
+                extent = Math.max(extent, Math.abs(p.x - 50), Math.abs(p.y - 50));
+            }
+    return target / (extent || 1);
+}
 
 /** A lattice node index turned into a cube coordinate, centred on the origin. */
 export const at = (i: number, n: number) => (n === 0 ? 0 : i / n - 0.5);
@@ -62,7 +88,7 @@ function shade(a: Vec3, b: Vec3, c: Vec3): number {
 export interface Line { x1: number; y1: number; x2: number; y2: number; near: number; depth: number; }
 
 /** Every edge of the cell lattice: the twelve grid planes Quad Box stacks. */
-export function latticeLines(cols: number, rows: number, layers: number, r: Rot): Line[] {
+export function latticeLines(cols: number, rows: number, layers: number, r: Rot, fill: number): Line[] {
     const out: Line[] = [];
     const push = (a: Pt, b: Pt) => out.push({
         x1: a.x, y1: a.y, x2: b.x, y2: b.y,
@@ -71,16 +97,16 @@ export function latticeLines(cols: number, rows: number, layers: number, r: Rot)
     });
     for (let row = 0; row <= rows; row++)
         for (let l = 0; l <= layers; l++)
-            push(project(at(0, cols), at(row, rows), at(l, layers), r),
-                 project(at(cols, cols), at(row, rows), at(l, layers), r));
+            push(project(at(0, cols), at(row, rows), at(l, layers), r, fill),
+                 project(at(cols, cols), at(row, rows), at(l, layers), r, fill));
     for (let col = 0; col <= cols; col++)
         for (let l = 0; l <= layers; l++)
-            push(project(at(col, cols), at(0, rows), at(l, layers), r),
-                 project(at(col, cols), at(rows, rows), at(l, layers), r));
+            push(project(at(col, cols), at(0, rows), at(l, layers), r, fill),
+                 project(at(col, cols), at(rows, rows), at(l, layers), r, fill));
     for (let col = 0; col <= cols; col++)
         for (let row = 0; row <= rows; row++)
-            push(project(at(col, cols), at(row, rows), at(0, layers), r),
-                 project(at(col, cols), at(row, rows), at(layers, layers), r));
+            push(project(at(col, cols), at(row, rows), at(0, layers), r, fill),
+                 project(at(col, cols), at(row, rows), at(layers, layers), r, fill));
     return out;
 }
 
@@ -106,8 +132,9 @@ export function prismFaces(opts: {
     radius: number;     // cube units
     depth: number;      // cube units, the full extrusion
     rot: Rot;
+    fill: number;
 }): Face[] {
-    const { centre, radii, radius, depth, rot } = opts;
+    const { centre, radii, radius, depth, rot, fill } = opts;
     const n = radii.length;
     const front: Vec3[] = [], back: Vec3[] = [];
     for (let i = 0; i < n; i++) {
@@ -120,7 +147,7 @@ export function prismFaces(opts: {
 
     const faces: Face[] = [];
     const add = (vs: Vec3[], kind: 'cap' | 'side', index: number) => {
-        const ps = vs.map(toScreen);
+        const ps = vs.map(v => toScreen(v, fill));
         const xs = ps.map(p => p.x), ys = ps.map(p => p.y);
         const x0 = Math.min(...xs), y0 = Math.min(...ys);
         // A square box, so the pattern is never stretched by the projection.

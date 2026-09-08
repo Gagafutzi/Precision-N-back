@@ -64,6 +64,11 @@ export type Settings = {
   matchRate: number;
   lureRate: number;
   isi: number;
+  /* How long a stimulus stays on screen, in milliseconds. Separate from the
+     interval, which is measured onset to onset: shortening the showing is what
+     makes a trial hard, shortening the gap is what makes a session quick, and
+     someone still learning the task wants those two dials apart. */
+  stimulusDuration: number;
   gridRows: number;
   gridCols: number;
   /* A separate mode rather than a replacement: the 2D grid is what the spatial
@@ -122,6 +127,8 @@ export type PerformanceRecord = {
     gridLayers?: number;
     spatial3dRotate?: boolean;
     spatial3dRotateSeconds?: number;
+    /* Optional for the same reason: records predate the setting. */
+    stimulusDuration?: number;
   };
   score: Score;
   accuracy?: number; // Optional accuracy field

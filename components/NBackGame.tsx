@@ -37,7 +37,7 @@ function playSyllable(index: number) {
   src.start();
 }
 import ShapeDisplay, { ColorPatternSvg } from './ShapeDisplay';
-import { REST_ROT, Rot, at, latticeLines, prismFaces } from './box3d';
+import { REST_ROT, Rot, at, fitFill, latticeLines, prismFaces, WORST_FILL } from './box3d';
 
 declare namespace Tone {
   interface Synth {
@@ -137,7 +137,13 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   }, [settings.spatial3dEnabled, settings.spatial3dRotate, settings.spatial3dRotateSeconds]);
   const { audioThreshold, colorThreshold, shapeThreshold } = settings;
   
-  const stimulusDuration = 500;
+  /* Clamped rather than trusted: the value comes from a number field, and a
+     stimulus shorter than a frame or longer than its own trial is not a
+     setting, it is a stuck game. */
+  const stimulusDuration = Math.min(
+    Math.max(80, settings.stimulusDuration || 500),
+    Math.max(200, settings.isi - 100),
+  );
 
   const [history, setHistory] = useState<NBackEvent[]>([]);
   const [currentEvent, setCurrentEvent] = useState<NBackEvent | null>(null);
@@ -575,44 +581,50 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   // Fix: Explicitly type accumulator and value in reduce to prevent type inference issues with Object.values.
   const totalHits = Object.values(score.hits).reduce((sum: number, h: number) => sum + h, 0);
 
-  /* The board is square in 3D and cell-shaped in 2D; either way it is capped by
-     the viewport's height so it can be as large as the screen allows without
-     pushing the controls off the bottom. */
   const boardAspect = settings.spatial3dEnabled ? 1 : gridCols / gridRows;
   const responseButtons = [
     settings.spatialEnabled && <button key="spatial" onClick={() => handleUserResponse('spatial')} className={getButtonClass('spatial')}>Position <span className="text-xs opacity-70">(A)</span></button>,
-    settings.audioEnabled && <button key="audio" onClick={() => handleUserResponse('audio')} className={getButtonClass('audio')}>Audio <span className="text-xs opacity-70">(L)</span></button>,
     settings.colorEnabled && <button key="color" onClick={() => handleUserResponse('color')} className={getButtonClass('color')}>Color <span className="text-xs opacity-70">(F)</span></button>,
+    settings.audioEnabled && <button key="audio" onClick={() => handleUserResponse('audio')} className={getButtonClass('audio')}>Audio <span className="text-xs opacity-70">(L)</span></button>,
     settings.shapeEnabled && <button key="shape" onClick={() => handleUserResponse('shape')} className={getButtonClass('shape')}>Shape <span className="text-xs opacity-70">(J)</span></button>,
     settings.syllableEnabled && <button key="syllable" onClick={() => handleUserResponse('syllable')} className={getButtonClass('syllable')}>Syllable <span className="text-xs opacity-70">(K)</span></button>,
   ].filter(Boolean);
+  /* Split down both sides, the way Quad Box does: the board is then bounded by
+     the window's height rather than by whatever the controls leave over, and
+     neither hand reaches across. */
+  const leftButtons = responseButtons.slice(0, Math.ceil(responseButtons.length / 2));
+  const rightButtons = responseButtons.slice(Math.ceil(responseButtons.length / 2));
+  const sideColumn = 'flex flex-row lg:flex-col gap-3 justify-center w-full lg:w-40 xl:w-44 shrink-0';
 
   return (
-    <div className="flex flex-col p-3 sm:p-5 bg-gray-800 rounded-xl shadow-2xl w-full max-w-6xl">
-      <div className="w-full flex justify-between items-center mb-3">
+    <div className="flex flex-col p-2 sm:p-3 bg-gray-800 rounded-xl shadow-2xl w-full">
+      <div className="w-full flex justify-between items-center mb-2 px-1">
         <h2 className="text-xl md:text-2xl font-bold text-primary">{getGameTitle()}</h2>
         <div className="text-lg font-mono">Trial: {trialNumber} / {totalTrials}</div>
       </div>
 
-      {/* The controls sit beside the board rather than under it, so the box gets
-          the height of the window instead of what is left over. */}
-      <div className="w-full flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-6">
+      <div className="w-full flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-5">
+        <div className={`${sideColumn} order-2 lg:order-1`}>{leftButtons}</div>
       <div
         ref={gameBoardRef}
-        className="relative bg-gray-900 rounded-lg shadow-inner mx-auto lg:flex-1 lg:min-w-0"
+        className="relative bg-gray-900 rounded-lg shadow-inner mx-auto order-1 lg:order-2 lg:flex-1 lg:min-w-0"
         style={{
           /* The flat grid lines belong to the 2D board. In 3D the lattice draws
              its own, or the fixed backdrop reads as a plane the cells float in
              front of. */
           ...(settings.spatial3dEnabled ? {} : gridStyle),
           width: '100%',
-          maxWidth: `min(100%, ${(76 * boardAspect).toFixed(1)}vh)`,
+          maxWidth: `min(100%, ${(84 * boardAspect).toFixed(1)}vh)`,
           aspectRatio: `${boardAspect}`,
           overflow: 'hidden',
         }}
       >
         {settings.spatial3dEnabled && (() => {
-          const lines = latticeLines(gridCols, gridRows, layers, rot);
+          /* A box that is not turning has no worst case to reserve room for, so
+             it is fitted to the attitude it is actually in. A turning one keeps
+             the widest attitude's scale throughout, or it would pulse. */
+          const fill = settings.spatial3dRotate ? WORST_FILL : fitFill(rot);
+          const lines = latticeLines(gridCols, gridRows, layers, rot, fill);
 
           /* One cell across the tightest axis is the room the stimulus has, so
              ballSize means the same thing here as it does on the flat board. */
@@ -637,6 +649,7 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
             radius,
             depth: radius * 1.1,
             rot,
+            fill,
           }) : [];
 
           /* Lattice edges behind the stimulus are drawn before it and the rest
@@ -644,9 +657,9 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
           const mid = faces.length ? (faces[0].depth + faces[faces.length - 1].depth) / 2 : Infinity;
           const edge = (l: typeof lines[number], i: number) => (
             <line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2}
-                  stroke="rgba(200,220,255,0.55)"
-                  strokeOpacity={0.22 + 0.78 * Math.min(1, Math.max(0, (l.near - 0.8) * 2.2))}
-                  strokeWidth={0.16} vectorEffect="non-scaling-stroke" />
+                  stroke="rgba(203,213,225,0.9)"
+                  strokeOpacity={0.30 + 0.70 * Math.min(1, Math.max(0, (l.near - 0.8) * 2.2))}
+                  strokeWidth={0.16} strokeLinecap="round" />
           );
 
           return (
@@ -718,12 +731,10 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
         )}
       </div>
 
-        <div className="grid grid-cols-2 lg:flex lg:flex-col gap-3 w-full lg:w-52 shrink-0">
-          {responseButtons}
-        </div>
+        <div className={`${sideColumn} order-3`}>{rightButtons}</div>
       </div>
 
-      <div className="mt-4 w-full flex justify-between items-center text-gray-400 font-mono">
+      <div className="mt-2 w-full flex justify-between items-center text-gray-400 font-mono px-1">
         <button onClick={quitSession} className="px-4 py-2 bg-red-800 hover:bg-red-700 text-white font-bold rounded-lg text-sm">Quit</button>
         {feedbackEnabled && (
           <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-sm">
