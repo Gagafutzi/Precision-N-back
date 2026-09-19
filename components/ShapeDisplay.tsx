@@ -16,10 +16,11 @@ interface ShapeDisplayProps {
 /**
  * The colour pattern on its own, in a size x size box.
  *
- * Pulled out of ShapeDisplay so the 3D board can paint the same pattern onto a
- * projected face, clipped to the face's own outline rather than to a square.
+ * The flat board's stimulus. The 3D board does not use it: a picture stamped on
+ * a face is what `texture3d.ts` exists to replace, and it builds the same ten
+ * patterns as fields over space instead.
  */
-export const ColorPatternSvg: React.FC<{
+const ColorPatternSvg: React.FC<{
   hues: [number, number, number];
   size: number;
   colorPattern: ColorPattern;

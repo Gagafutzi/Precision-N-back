@@ -9,6 +9,8 @@
  * rather than looked at, and nothing can wander outside the board.
  */
 
+import { SolidTexture } from './texture3d';
+
 export const CAMERA = 3.4;   // eye distance in cube widths; smaller is wider-angle
 export const TARGET = 49;    // half-extent the box is fitted to, of the 50 available
 
@@ -75,16 +77,6 @@ export function fitFill(r: Rot, target = TARGET): number {
 /** A lattice node index turned into a cube coordinate, centred on the origin. */
 export const at = (i: number, n: number) => (n === 0 ? 0 : i / n - 0.5);
 
-/** Lambert on the face's own normal, two-sided so winding never matters. */
-function shade(a: Vec3, b: Vec3, c: Vec3): number {
-    const ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
-    const vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
-    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-    const len = Math.hypot(nx, ny, nz) || 1;
-    const d = Math.abs((nx * LIGHT.x + ny * LIGHT.y + nz * LIGHT.z) / len);
-    return 0.45 + 0.55 * d;
-}
-
 export interface Line { x1: number; y1: number; x2: number; y2: number; near: number; depth: number; }
 
 /** Every edge of the cell lattice: the twelve grid planes Quad Box stacks. */
@@ -110,61 +102,204 @@ export function latticeLines(cols: number, rows: number, layers: number, r: Rot,
     return out;
 }
 
-export interface Face {
-    points: string;                 // ready for an SVG polygon
-    depth: number;                  // mean view z; the painter's key
-    light: number;                  // 0..1
-    kind: 'cap' | 'side';
-    index: number;                  // which side, for picking a hue
-    box: { x: number; y: number; s: number };  // square the cap's pattern is drawn into
-}
+
+/* ------------------------------------------------------------------ *
+ *  The stimulus as a solid
+ * ------------------------------------------------------------------ */
 
 /**
- * The stimulus as a solid: the shape's own outline extruded into a prism.
+ * The rotation as a matrix, built once a frame instead of per point.
  *
- * A sprite facing the camera would stay a sprite however the box turned. Giving
- * the outline a depth means the sides come into view as it rotates, which is
- * what makes it read as an object sitting in the box rather than on top of it.
+ * `view` recomputes six trigonometric functions every time it is called, which
+ * is nothing for the lattice's few dozen corners and a great deal for the
+ * thousand-odd the stimulus mesh needs at sixty frames a second.
  */
-export function prismFaces(opts: {
+export type Mat3 = readonly number[];
+
+export function rotMatrix(r: Rot): Mat3 {
+    const cz = Math.cos(r.z), sz = Math.sin(r.z);
+    const cy = Math.cos(r.y), sy = Math.sin(r.y);
+    const cx = Math.cos(r.x), sx = Math.sin(r.x);
+    // The same order `view` applies: z, then y, then x.
+    return [
+        cy * cz,                    -cy * sz,                   sy,
+        cx * sz + sx * sy * cz,     cx * cz - sx * sy * sz,     -sx * cy,
+        sx * sz - cx * sy * cz,     sx * cz + cx * sy * sz,     cx * cy,
+    ];
+}
+
+const LIGHT_LEN = Math.hypot(LIGHT.x, LIGHT.y, LIGHT.z);
+const LX = LIGHT.x / LIGHT_LEN, LY = LIGHT.y / LIGHT_LEN, LZ = LIGHT.z / LIGHT_LEN;
+
+/** Lit by the face's own normal, with a small highlight so it reads as solid. */
+const AMBIENT = 0.30;
+/** Quantisation of the shading, so facets of equal colour can share one path. */
+const SHADE_BANDS = 20;
+const SPEC_BANDS = 10;
+
+/** Roughly how many facets round the stimulus; rounded to a multiple of the
+ *  vertex count so the shape's own corners land on facet edges. */
+const LON_TARGET = 60;
+/** Facet rows from pole to pole. */
+const LAT = 30;
+
+const TAU = Math.PI * 2;
+
+/**
+ * The outline's radius at an arbitrary angle, along the straight edge between
+ * two of its vertices — so the solid's widest cross-section is exactly the
+ * polygon the flat board draws, not a smoothed version of it.
+ */
+function edgeRadius(radii: number[], i: number, lon: number): number {
+    const n = radii.length;
+    if (n < 3) return 1;
+    const t = (i * n) / lon;
+    const k = Math.floor(t);
+    const f = t - k;
+    const d = TAU / n;
+    const r0 = radii[k % n], r1 = radii[(k + 1) % n];
+    const denom = r0 * Math.sin(f * d) + r1 * Math.sin((1 - f) * d);
+    return denom > 1e-6 ? (r0 * r1 * Math.sin(d)) / denom : Math.max(r0, r1);
+}
+
+/** A run of facets that came out the same colour, merged into one path. */
+export interface Patch { d: string; fill: string; }
+
+/**
+ * The stimulus as a closed, lit, textured solid.
+ *
+ * The body is the shape's own outline swept from pole to pole: the equator is
+ * the polygon exactly, so face-on the silhouette is the one the flat board
+ * draws, and every other attitude is that outline seen as an object. Colour
+ * comes from the solid texture, sampled at each facet's position *in the
+ * stimulus's own space* — which is what makes the pattern turn with the solid
+ * instead of sliding across it.
+ *
+ * Back faces are dropped rather than sorted. The body is star-shaped about its
+ * centre and gently enough sloped that no front facet can hide another — even
+ * at the deepest dent a lure can put in it, the front faces of a tumbling solid
+ * overlap each other over a ten-thousandth of the area they cover, which is the
+ * slivers where they meet at the poles. So what is left needs no depth order at
+ * all, and that in turn lets facets of equal colour be merged into a single
+ * path: a few dozen elements a frame instead of nearly a thousand.
+ */
+export function solidPatches(opts: {
     centre: Vec3;
-    radii: number[];    // per-vertex radius multipliers, 0..1
-    radius: number;     // cube units
-    depth: number;      // cube units, the full extrusion
+    radii: number[];      // per-vertex radius multipliers, 0..1
+    radius: number;       // cube units
     rot: Rot;
     fill: number;
-}): Face[] {
-    const { centre, radii, radius, depth, rot, fill } = opts;
+    texture: SolidTexture;
+}): Patch[] {
+    const { centre, radii, radius, rot, fill, texture } = opts;
     const n = radii.length;
-    const front: Vec3[] = [], back: Vec3[] = [];
-    for (let i = 0; i < n; i++) {
-        const a = (i / n) * 2 * Math.PI - Math.PI / 2;
-        const dx = radius * radii[i] * Math.cos(a);
-        const dy = radius * radii[i] * Math.sin(a);
-        front.push(view(centre.x + dx, centre.y + dy, centre.z + depth / 2, rot));
-        back.push(view(centre.x + dx, centre.y + dy, centre.z - depth / 2, rot));
+    const lon = n >= 3 ? n * Math.max(3, Math.round(LON_TARGET / n)) : LON_TARGET;
+    const rows = LAT + 1;
+    const count = lon * rows;
+
+    const m = rotMatrix(rot);
+    const cvx = m[0] * centre.x + m[1] * centre.y + m[2] * centre.z;
+    const cvy = m[3] * centre.x + m[4] * centre.y + m[5] * centre.z;
+    const cvz = m[6] * centre.x + m[7] * centre.y + m[8] * centre.z;
+
+    const ox = new Float64Array(count), oy = new Float64Array(count), oz = new Float64Array(count);
+    const vz = new Float64Array(count);
+    const px = new Float64Array(count), py = new Float64Array(count);
+    const vx = new Float64Array(count), vy = new Float64Array(count);
+
+    const rho = new Float64Array(lon);
+    const ca = new Float64Array(lon), sa = new Float64Array(lon);
+    for (let i = 0; i < lon; i++) {
+        const a = (i / lon) * TAU - Math.PI / 2;
+        rho[i] = edgeRadius(radii, i, lon);
+        ca[i] = Math.cos(a);
+        sa[i] = Math.sin(a);
     }
 
-    const faces: Face[] = [];
-    const add = (vs: Vec3[], kind: 'cap' | 'side', index: number) => {
-        const ps = vs.map(v => toScreen(v, fill));
-        const xs = ps.map(p => p.x), ys = ps.map(p => p.y);
-        const x0 = Math.min(...xs), y0 = Math.min(...ys);
-        // A square box, so the pattern is never stretched by the projection.
-        const s = Math.max(Math.max(...xs) - x0, Math.max(...ys) - y0) || 1;
-        faces.push({
-            points: ps.map(p => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' '),
-            depth: vs.reduce((t, v) => t + v.z, 0) / vs.length,
-            light: shade(vs[0], vs[1], vs[2]),
-            kind,
-            index,
-            box: { x: x0 + (Math.max(...xs) - x0 - s) / 2, y: y0 + (Math.max(...ys) - y0 - s) / 2, s },
-        });
-    };
+    for (let j = 0; j < rows; j++) {
+        const phi = -Math.PI / 2 + (j / LAT) * Math.PI;
+        // A touch fuller than a sphere, so more of the texture faces the eye.
+        const ring = Math.pow(Math.max(0, Math.cos(phi)), 0.8);
+        const zc = Math.sin(phi);
+        for (let i = 0; i < lon; i++) {
+            const k = j * lon + i;
+            const ux = rho[i] * ring * ca[i];
+            const uy = rho[i] * ring * sa[i];
+            ox[k] = ux; oy[k] = uy; oz[k] = zc;
+            const wx = m[0] * ux + m[1] * uy + m[2] * zc;
+            const wy = m[3] * ux + m[4] * uy + m[5] * zc;
+            const wz = m[6] * ux + m[7] * uy + m[8] * zc;
+            const X = cvx + wx * radius, Y = cvy + wy * radius, Z = cvz + wz * radius;
+            vx[k] = X; vy[k] = Y; vz[k] = Z;
+            const scale = CAMERA / (CAMERA - Z);
+            px[k] = 50 + X * scale * 50 * fill;
+            py[k] = 50 + Y * scale * 50 * fill;
+        }
+    }
 
-    add(back, 'cap', -1);
-    for (let i = 0; i < n; i++) add([front[i], front[(i + 1) % n], back[(i + 1) % n], back[i]], 'side', i);
-    add(front, 'cap', -1);
+    const groups = new Map<string, { fill: string; parts: string[]; depth: number; count: number }>();
 
-    return faces.sort((a, b) => a.depth - b.depth);   // far first
+    for (let j = 0; j < LAT; j++) {
+        for (let i = 0; i < lon; i++) {
+            const i2 = (i + 1) % lon;
+            const a = j * lon + i, b = j * lon + i2, c = (j + 1) * lon + i2, d = (j + 1) * lon + i;
+
+            // The two diagonals: robust where a pole row collapses to a point.
+            const e1x = vx[c] - vx[a], e1y = vy[c] - vy[a], e1z = vz[c] - vz[a];
+            const e2x = vx[d] - vx[b], e2y = vy[d] - vy[b], e2z = vz[d] - vz[b];
+            let nx = e1y * e2z - e1z * e2y;
+            let ny = e1z * e2x - e1x * e2z;
+            let nz = e1x * e2y - e1y * e2x;
+            const nlen = Math.hypot(nx, ny, nz);
+            if (nlen < 1e-12) continue;
+            nx /= nlen; ny /= nlen; nz /= nlen;
+
+            const gx = (vx[a] + vx[b] + vx[c] + vx[d]) / 4;
+            const gy = (vy[a] + vy[b] + vy[c] + vy[d]) / 4;
+            const gz = (vz[a] + vz[b] + vz[c] + vz[d]) / 4;
+
+            // Toward the eye, exactly rather than approximately: the box is
+            // drawn in perspective, so "facing the camera" depends on where in
+            // the frame the facet sits.
+            let ex = -gx, ey = -gy, ez = CAMERA - gz;
+            if (nx * ex + ny * ey + nz * ez <= 0) continue;
+            const elen = Math.hypot(ex, ey, ez) || 1;
+            ex /= elen; ey /= elen; ez /= elen;
+
+            const diff = Math.max(0, nx * LX + ny * LY + nz * LZ);
+            let hx = LX + ex, hy = LY + ey, hz = LZ + ez;
+            const hlen = Math.hypot(hx, hy, hz) || 1;
+            const spec = Math.pow(Math.max(0, (nx * hx + ny * hy + nz * hz) / hlen), 28) * 0.55;
+
+            const pi = texture.sample(
+                (ox[a] + ox[b] + ox[c] + ox[d]) / 4,
+                (oy[a] + oy[b] + oy[c] + oy[d]) / 4,
+                (oz[a] + oz[b] + oz[c] + oz[d]) / 4,
+            );
+
+            const sb = Math.round((AMBIENT + (1 - AMBIENT) * diff) * SHADE_BANDS);
+            const pb = Math.round(spec * SPEC_BANDS);
+            const key = `${pi}|${sb}|${pb}`;
+            let g = groups.get(key);
+            if (!g) {
+                const base = texture.palette[pi] ?? texture.palette[0];
+                const sp = pb / SPEC_BANDS;
+                const lit = base.l * (sb / SHADE_BANDS);
+                const l = Math.max(0, Math.min(100, lit + sp * (100 - lit)));
+                const s = Math.max(0, Math.min(100, base.s * (1 - 0.55 * sp)));
+                g = { fill: `hsl(${base.h.toFixed(0)}, ${s.toFixed(0)}%, ${l.toFixed(1)}%)`, parts: [], depth: 0, count: 0 };
+                groups.set(key, g);
+            }
+            g.parts.push(
+                `M${px[a].toFixed(2)} ${py[a].toFixed(2)}L${px[b].toFixed(2)} ${py[b].toFixed(2)}` +
+                `L${px[c].toFixed(2)} ${py[c].toFixed(2)}L${px[d].toFixed(2)} ${py[d].toFixed(2)}Z`,
+            );
+            g.depth += gz;
+            g.count++;
+        }
+    }
+
+    return [...groups.values()]
+        .sort((p, q) => p.depth / p.count - q.depth / q.count)
+        .map(g => ({ d: g.parts.join(''), fill: g.fill }));
 }

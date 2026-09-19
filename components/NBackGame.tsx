@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useCallback, useMemo, useId } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { NBackEvent, Score, Settings, Shape, Modality } from '../types';
 import { SYLLABLES, SYLLABLE_AUDIO } from '../syllableAudio';
 
@@ -36,8 +36,9 @@ function playSyllable(index: number) {
   src.connect(g).connect(sylCtx.destination);
   src.start();
 }
-import ShapeDisplay, { ColorPatternSvg } from './ShapeDisplay';
-import { REST_ROT, Rot, at, fitFill, latticeLines, prismFaces, WORST_FILL } from './box3d';
+import ShapeDisplay from './ShapeDisplay';
+import { REST_ROT, Rot, at, fitFill, latticeLines, solidPatches, view, WORST_FILL } from './box3d';
+import { buildTexture, plainTexture } from './texture3d';
 
 declare namespace Tone {
   interface Synth {
@@ -116,7 +117,6 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
    * box holds its attitude when rotation is switched off, instead of snapping
    * back to the start.
    */
-  const clipBase = useId();
   const [rot, setRot] = useState<Rot>(REST_ROT);
   useEffect(() => {
     if (!settings.spatial3dEnabled || !settings.spatial3dRotate) return;
@@ -166,6 +166,21 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   const scoreRef = useRef(score);
   const respondedToRef = useRef(new Set<string>());
   const activeModalitiesRef = useRef<Modality[]>([]);
+
+  /**
+   * The stimulus's material, rebuilt only when the trial's colours are.
+   *
+   * It is a closure over the trial's hues and its bubble or contour data, and
+   * the renderer calls it once per facet — a thousand times a frame while the
+   * box turns. Rebuilding it each frame would rebuild those arrays each frame
+   * too, for a texture that has not changed.
+   */
+  const texture = useMemo(
+    () => (settings.spatial3dEnabled && settings.colorEnabled && currentEvent
+      ? buildTexture(settings.colorPattern, currentEvent.hues, currentEvent.bubbleData, currentEvent.topoData)
+      : plainTexture()),
+    [settings.spatial3dEnabled, settings.colorEnabled, settings.colorPattern, currentEvent],
+  );
 
   const validNValues = useMemo(() => {
     if (!settings.variableN) return [];
@@ -645,23 +660,22 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
           } : null;
 
           const show = isStimulusVisible && currentEvent && centre;
-          const faces = show ? prismFaces({
+          const patches = show ? solidPatches({
             centre: centre!,
             /* Without the shape modality every stimulus is the same solid, so a
-               ring of equal radii — a cylinder — stands in for the circle the
-               flat board draws. */
+               plain sphere stands in for the circle the flat board draws. */
             radii: settings.shapeEnabled
               ? currentEvent!.shape.vertices.map(v => v.radius)
-              : Array.from({ length: 24 }, () => 1),
+              : [],
             radius,
-            depth: radius * 1.1,
             rot,
             fill,
+            texture,
           }) : [];
 
           /* Lattice edges behind the stimulus are drawn before it and the rest
              after, so the box passes in front of the solid as it turns. */
-          const mid = faces.length ? (faces[0].depth + faces[faces.length - 1].depth) / 2 : Infinity;
+          const mid = show ? view(centre!.x, centre!.y, centre!.z, rot).z : Infinity;
           const edge = (l: typeof lines[number], i: number) => (
             <line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2}
                   stroke="rgba(203,213,225,0.9)"
@@ -671,35 +685,14 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
 
           return (
             <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full">
-              <defs>
-                {faces.map((f, i) => f.kind === 'cap' && settings.colorEnabled ? (
-                  <clipPath key={i} id={`${clipBase}-${i}`}><polygon points={f.points} /></clipPath>
-                ) : null)}
-              </defs>
               {lines.filter(l => l.depth <= mid).map(edge)}
-              {faces.map((f, i) => (
-                <g key={i}>
-                  {f.kind === 'cap' && settings.colorEnabled ? (
-                    <g clipPath={`url(#${clipBase}-${i})`}>
-                      <g transform={`translate(${f.box.x} ${f.box.y}) scale(${f.box.s / 100})`}>
-                        <ColorPatternSvg
-                          hues={currentEvent!.hues}
-                          size={100}
-                          colorPattern={settings.colorPattern}
-                          bubbleData={currentEvent!.bubbleData}
-                          topoData={currentEvent!.topoData}
-                        />
-                      </g>
-                    </g>
-                  ) : (
-                    <polygon points={f.points} fill={settings.colorEnabled
-                      ? `hsl(${currentEvent!.hues[f.index % 3]}, 80%, 45%)`
-                      : 'var(--color-primary)'} />
-                  )}
-                  {/* One darkening pass over the finished face, so a pattern and
-                      a flat fill take the same light. */}
-                  <polygon points={f.points} fill="#000" opacity={1 - f.light} />
-                </g>
+              {/* Each path is every facet that came out the same colour. The
+                  hairline stroke is the facets' own colour: neighbours in
+                  different paths would otherwise show the background through
+                  the seam between them. */}
+              {patches.map((p, i) => (
+                <path key={i} d={p.d} fill={p.fill} stroke={p.fill}
+                      strokeWidth={0.12} strokeLinejoin="round" />
               ))}
               {lines.filter(l => l.depth > mid).map(edge)}
             </svg>
