@@ -6,6 +6,7 @@ import NBackGame from './components/NBackGame';
 import SettingsComponent from './components/Settings';
 import Performance from './components/Performance';
 import { useLocalStorage } from './hooks/useLocalStorage';
+import { SYLLABLES } from './syllableAudio';
 
 const DEFAULT_SETTINGS: Settings = {
   nLevel: 2,
@@ -36,6 +37,7 @@ const DEFAULT_SETTINGS: Settings = {
   shapeEnabled: false,
   syllableEnabled: false,
   syllableRate: 1.0,
+  syllablePoolSize: SYLLABLES.length,
   shapeVertices: 6,
   colorPattern: 'vertical',
   feedbackEnabled: true,
@@ -99,6 +101,7 @@ const App: React.FC = () => {
           spatial3dRotateSeconds: settings.spatial3dRotateSeconds,
           stimulusDuration: settings.stimulusDuration,
           syllableRate: settings.syllableRate,
+          syllablePoolSize: settings.syllablePoolSize,
         },
         score: finalScore,
         accuracy: accuracy,

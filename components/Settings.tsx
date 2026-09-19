@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { Settings } from '../types';
+import { SYLLABLES } from '../syllableAudio';
 import {
   SYLLABLE_RATE_MAX,
   SYLLABLE_RATE_MIN,
@@ -109,7 +110,7 @@ const SettingsComponent: React.FC<SettingsProps> = ({ settings, onSave, onBack }
                      value={localSettings.syllableRate * 100}
                      onChange={handleSliderChange} className="w-1/3" />
               <button type="button"
-                      onClick={() => void previewSyllable(localSettings.syllableRate)}
+                      onClick={() => void previewSyllable(localSettings.syllableRate, localSettings.syllablePoolSize)}
                       className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">
                 Hear one
               </button>
@@ -120,6 +121,20 @@ const SettingsComponent: React.FC<SettingsProps> = ({ settings, onSave, onBack }
               {syllableMaxMs(localSettings.syllableRate) > localSettings.isi && (
                 <span className="text-yellow-400"> That is longer than the {localSettings.isi} ms interval, so it will be cut off by the next trial.</span>
               )}
+            </p>
+
+            <div className="flex justify-between items-center">
+              <label htmlFor="syllablePoolSize">Syllable Variety (of {SYLLABLES.length})</label>
+              <input type="range" name="syllablePoolSize" id="syllablePoolSize"
+                     min="4" max={SYLLABLES.length} step="1"
+                     value={localSettings.syllablePoolSize} onChange={handleChange}
+                     className="w-1/2" />
+              <span>{localSettings.syllablePoolSize}</span>
+            </div>
+            <p className="text-xs text-gray-400 px-1">
+              How many of the inventory are in play. Fewer is easier: with a small pool
+              much of what you hear is something you heard recently anyway, and the
+              channel starts rewarding familiarity rather than recall.
             </p>
           </>
         )}

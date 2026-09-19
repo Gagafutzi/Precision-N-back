@@ -10,6 +10,10 @@ Needs flite (with its CMU slt voice) and lame on PATH; both are permissively
 licensed and both run locally, so nothing is fetched and no third-party
 recording is redistributed. On Debian/Ubuntu: apt-get install flite lame.
 
+The syllables are synthesised from phones, not spelled words, so the set is a
+designed inventory rather than a list someone thought of: every onset meets
+every vowel, and the coda follows from the pair. See INVENTORY below.
+
 What it does beyond calling flite: trims the silence flite pads each utterance
 with, fades 5 ms at each end so the clip cannot click, and matches the clips to
 one another in loudness. The last one matters more than it sounds — a set where
@@ -27,11 +31,45 @@ import tempfile
 import wave
 from pathlib import Path
 
-# See the header of syllableAudio.ts for why this set is what it is.
-SYLLABLES = [
-    "bark", "chime", "dune", "fetch", "gong", "hush", "jolt", "keel",
-    "lung", "moss", "nerve", "pouch", "rain", "south", "toast", "wedge",
-]
+# The inventory: seven onsets, seven vowels, seven codas, each chosen as far
+# from its neighbours in the set as the English phoneme space allows — stops at
+# three places, a nasal, a liquid, two fricatives; the vowels at the corners and
+# edges of the vowel space rather than clustered in it.
+ONSETS = [("b", "b"), ("t", "t"), ("k", "k"), ("f", "f"), ("sh", "sh"), ("m", "m"), ("l", "l")]
+VOWELS = [("aa", "ah"), ("iy", "ee"), ("uw", "oo"), ("eh", "eh"), ("ow", "oh"), ("ay", "ai"), ("er", "ur")]
+CODAS = [("p", "p"), ("t", "t"), ("k", "k"), ("s", "ss"), ("n", "n"), ("ng", "ng"), ("l", "l")]
+K = len(ONSETS)
+
+
+def inventory():
+    """Every onset x vowel, with the coda fixed by the pair: 49 syllables of
+    which no two differ in only one sound.
+
+    The coda is (onset + vowel) mod 7 rather than free. Free would give 343
+    syllables and put minimal pairs all through them — bahp and baht differing
+    by one phoneme at the very end, which is a discrimination test, not a memory
+    one. Tying it to the other two makes every pair of syllables differ in at
+    least two of the three sounds, the same property the old hand-picked set
+    had, now guaranteed by construction rather than by checking.
+
+    Emitted along the diagonals, so consecutive entries differ in all three
+    sounds and any leading slice of the list is a spread of the whole inventory
+    rather than seven syllables that all start with b — which is what the
+    variety setting takes.
+    """
+    out = []
+    for d in range(K):
+        for i in range(K):
+            j = (i + d) % K
+            onset, vowel, coda = ONSETS[i], VOWELS[j], CODAS[(i + j) % K]
+            out.append((
+                onset[1] + vowel[1] + coda[1],                     # how it is spelled
+                f"pau {onset[0]} {vowel[0]} {coda[0]} pau",        # how it is said
+            ))
+    return out
+
+
+SYLLABLES = inventory()
 
 VOICE = "slt"
 # Flite's own rate is brisk to the point of clipped. This is the "slightly
@@ -42,15 +80,20 @@ LEAD_MS = 12           # kept either side of the trimmed speech
 FADE_MS = 5
 TARGET_RMS = 0.14      # common loudness for every clip
 PEAK_CEILING = 0.95
-BITRATE = 48           # kbps, mono 16 kHz: transparent enough for one syllable
+# kbps, mono 16 kHz. Measured against the un-encoded clips, 48 buys about a
+# decibel over 32 and costs 60% more bytes, and the whole set is inlined into
+# the bundle — so 32, and the size of the inventory goes into syllables.
+BITRATE = 32
 
 OUT = Path(__file__).resolve().parent.parent / "syllableAudio.ts"
 
 
-def render(word: str, wav_path: Path) -> None:
+def render(phones: str, wav_path: Path) -> None:
+    """Synthesised from phones (-p), not from spelling: these are not words, and
+    flite's letter-to-sound rules would have to guess at them."""
     subprocess.run(
         ["flite", "-voice", VOICE, "--setf", f"duration_stretch={DURATION_STRETCH}",
-         "-t", word, "-o", str(wav_path)],
+         "-p", phones, "-o", str(wav_path)],
         check=True,
     )
 
@@ -110,9 +153,9 @@ def main() -> int:
     longest_ms = 0
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        for word in SYLLABLES:
-            wav, clean, mp3 = tmp / f"{word}.wav", tmp / f"{word}.clean.wav", tmp / f"{word}.mp3"
-            render(word, wav)
+        for name, phones in SYLLABLES:
+            wav, clean, mp3 = tmp / f"{name}.wav", tmp / f"{name}.clean.wav", tmp / f"{name}.mp3"
+            render(phones, wav)
             rate, samples = read_wav(wav)
             samples = level(fade(trim(samples, rate), rate))
             write_wav(clean, rate, samples)
@@ -120,16 +163,17 @@ def main() -> int:
                 ["lame", "-m", "m", "-b", str(BITRATE), "-q", "2", "--quiet", str(clean), str(mp3)],
                 check=True,
             )
-            clips[word] = base64.b64encode(mp3.read_bytes()).decode("ascii")
+            clips[name] = base64.b64encode(mp3.read_bytes()).decode("ascii")
             longest_ms = max(longest_ms, round(1000 * len(samples) / rate))
-            print(f"  {word:<6} {len(samples) / rate:.2f}s  {mp3.stat().st_size / 1024:.1f}KB",
+            print(f"  {name:<8} {len(samples) / rate:.2f}s  {mp3.stat().st_size / 1024:.1f}KB",
                   file=sys.stderr)
 
     header = OUT.read_text().split("export const SYLLABLES")[0]
     body = [header.rstrip("\n"), ""]
+    names = [name for name, _ in SYLLABLES]
     body.append("export const SYLLABLES = [")
-    for i in range(0, len(SYLLABLES), 8):
-        body.append("  " + ", ".join(f'"{w}"' for w in SYLLABLES[i:i + 8]) + ",")
+    for i in range(0, len(names), 7):
+        body.append("  " + ", ".join(f'"{w}"' for w in names[i:i + 7]) + ",")
     body.append("] as const;")
     body.append("")
     body.append("export type Syllable = typeof SYLLABLES[number];")
@@ -139,8 +183,8 @@ def main() -> int:
     body.append(f"export const SYLLABLE_MAX_MS = {longest_ms};")
     body.append("")
     body.append("export const SYLLABLE_AUDIO: Record<string, string> = {")
-    for word in SYLLABLES:
-        body.append(f'  {word}: "{clips[word]}",')
+    for name, _ in SYLLABLES:
+        body.append(f'  {name}: "{clips[name]}",')
     body.append("};")
     OUT.write_text("\n".join(body) + "\n")
     total = sum(len(v) for v in clips.values()) / 1024

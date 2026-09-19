@@ -108,6 +108,11 @@ export type Settings = {
      Below 1 is slower and longer, above 1 quicker and shorter; the pitch does
      not move with it (see syllableVoice). */
   syllableRate: number;
+  /* How many of the syllable inventory are in play. The full set is 49; a
+     smaller pool is an easier channel, since fewer items means more of the
+     non-matches are things you heard recently anyway. Taken from the front of
+     SYLLABLES, which is ordered to spread the inventory rather than group it. */
+  syllablePoolSize: number;
   shapeVertices: number;
   colorPattern: ColorPattern;
   feedbackEnabled: boolean;
@@ -134,6 +139,7 @@ export type PerformanceRecord = {
     /* Optional for the same reason: records predate the setting. */
     stimulusDuration?: number;
     syllableRate?: number;
+    syllablePoolSize?: number;
   };
   score: Score;
   accuracy?: number; // Optional accuracy field

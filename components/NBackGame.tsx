@@ -117,6 +117,17 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
      offers: a stored rate of 0 would divide the speech by nothing. */
   const syllableRate = clampSyllableRate(settings.syllableRate);
 
+  /* Likewise: a pool of one is a channel with nothing to remember, and a pool
+     larger than the inventory would index past the end of it. */
+  const syllablePool = Math.min(
+    SYLLABLES.length,
+    Math.max(4, Math.round(settings.syllablePoolSize || SYLLABLES.length)),
+  );
+  const pickSyllable = useCallback(
+    () => Math.floor(Math.random() * syllablePool),
+    [syllablePool],
+  );
+
   const [history, setHistory] = useState<NBackEvent[]>([]);
   const [currentEvent, setCurrentEvent] = useState<NBackEvent | null>(null);
   const [trialNumber, setTrialNumber] = useState(0);
@@ -291,7 +302,7 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
         audio: 200 + Math.random() * 600,
         hues: generateRandomHues(),
         shape: generateBaseShape(settings.shapeVertices),
-        syllable: Math.floor(Math.random() * SYLLABLES.length),
+        syllable: pickSyllable(),
         isMatch: { audio: false, spatial: false, color: false, shape: false, syllable: false },
         lureType: 'none',
     };
@@ -393,7 +404,7 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
                    carry the target's own syllable, which would be a real match
                    rather than a lure. Fall back to a plain non-match. */
                 while (newEvent.syllable === targetEvent.syllable) {
-                  newEvent.syllable = Math.floor(Math.random() * SYLLABLES.length);
+                  newEvent.syllable = pickSyllable();
                 }
                 newEvent.lureType = 'none';
               }
@@ -433,7 +444,7 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
             }
             if (mod === 'syllable') {
               while (newEvent.syllable === targetEvent.syllable) {
-                newEvent.syllable = Math.floor(Math.random() * SYLLABLES.length);
+                newEvent.syllable = pickSyllable();
               }
             }
             if (mod === 'audio') {
@@ -453,7 +464,7 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
     
     setDevLureInfo(devInfoParts.join(' '));
     return newEvent;
-  }, [nLevel, variableN, matchRate, lureRate, settings, validNValues]);
+  }, [nLevel, variableN, matchRate, lureRate, settings, validNValues, pickSyllable]);
   
   const runTrial = useCallback(() => {
     const nextButtonHighlights: Record<Modality, 'none' | 'hit' | 'miss' | 'false_alarm'> = { spatial: 'none', audio: 'none', color: 'none', shape: 'none', syllable: 'none' };

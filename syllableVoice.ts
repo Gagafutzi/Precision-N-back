@@ -163,8 +163,10 @@ export function playSyllable(index: number) {
 export const syllableMaxMs = (rate: number) =>
   Math.round(SYLLABLE_MAX_MS / clampSyllableRate(rate));
 
-/** For the settings screen: decode if needed, then say one, at this rate. */
-export async function previewSyllable(rate: number, index?: number) {
+/** For the settings screen: decode if needed, then say one from the pool that
+    is in play, at the rate being previewed. */
+export async function previewSyllable(rate: number, pool = SYLLABLES.length) {
   await primeSyllables(rate);
-  playSyllable(index ?? Math.floor(Math.random() * SYLLABLES.length));
+  const size = Math.min(SYLLABLES.length, Math.max(1, Math.round(pool || SYLLABLES.length)));
+  playSyllable(Math.floor(Math.random() * size));
 }
