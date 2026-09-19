@@ -104,6 +104,10 @@ export type Settings = {
      the tone is a pitch discrimination and this is an identity, which are
      different questions and are allowed to run together. */
   syllableEnabled: boolean;
+  /* How fast the syllables are spoken, as a multiple of the rendered clips.
+     Below 1 is slower and longer, above 1 quicker and shorter; the pitch does
+     not move with it (see syllableVoice). */
+  syllableRate: number;
   shapeVertices: number;
   colorPattern: ColorPattern;
   feedbackEnabled: boolean;
@@ -129,6 +133,7 @@ export type PerformanceRecord = {
     spatial3dRotateSeconds?: number;
     /* Optional for the same reason: records predate the setting. */
     stimulusDuration?: number;
+    syllableRate?: number;
   };
   score: Score;
   accuracy?: number; // Optional accuracy field

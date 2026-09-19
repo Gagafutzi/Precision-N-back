@@ -1,41 +1,8 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { NBackEvent, Score, Settings, Shape, Modality } from '../types';
-import { SYLLABLES, SYLLABLE_AUDIO } from '../syllableAudio';
-
-/*
- * Decoded once and held, not decoded per trial: decoding is asynchronous, and a
- * stimulus arriving after its own trial has ended is worse than one that never
- * played — the response window has already closed on it.
- */
-let sylCtx: AudioContext | null = null;
-const sylBuffers: (AudioBuffer | null)[] = [];
-
-async function primeSyllables() {
-  if (!sylCtx) sylCtx = new AudioContext();
-  if (sylCtx.state === 'suspended') { try { await sylCtx.resume(); } catch (e) { /* awaits a gesture */ } }
-  await Promise.all(SYLLABLES.map(async (name, i) => {
-    if (sylBuffers[i]) return;
-    const b64 = SYLLABLE_AUDIO[name];
-    if (!b64) return;
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
-    try { sylBuffers[i] = await sylCtx!.decodeAudioData(bytes.buffer); } catch (e) { sylBuffers[i] = null; }
-  }));
-}
-
-function playSyllable(index: number) {
-  const buf = sylBuffers[index];
-  if (!sylCtx || !buf) return;
-  if (sylCtx.state === 'suspended') sylCtx.resume();
-  const src = sylCtx.createBufferSource();
-  src.buffer = buf;
-  const g = sylCtx.createGain();
-  g.gain.value = 0.9;
-  src.connect(g).connect(sylCtx.destination);
-  src.start();
-}
+import { SYLLABLES } from '../syllableAudio';
+import { clampSyllableRate, playSyllable, primeSyllables } from '../syllableVoice';
 import ShapeDisplay from './ShapeDisplay';
 import { REST_ROT, Rot, at, fitFill, latticeLines, solidPatches, view, WORST_FILL } from './box3d';
 import { buildTexture, plainTexture } from './texture3d';
@@ -146,6 +113,10 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
     Math.max(200, settings.isi - 100),
   );
 
+  /* Clamped for the same reason, and by the same range the settings slider
+     offers: a stored rate of 0 would divide the speech by nothing. */
+  const syllableRate = clampSyllableRate(settings.syllableRate);
+
   const [history, setHistory] = useState<NBackEvent[]>([]);
   const [currentEvent, setCurrentEvent] = useState<NBackEvent | null>(null);
   const [trialNumber, setTrialNumber] = useState(0);
@@ -239,9 +210,6 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
     }
     respondedToRef.current.add(responseKey);
   }, [feedbackEnabled]);
-
-  /* Decoding starts when the channel is switched on, not when a trial needs it. */
-  useEffect(() => { if (settings.syllableEnabled) void primeSyllables(); }, [settings.syllableEnabled]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -550,6 +518,11 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
     synthRef.current = new Tone.Synth().toDestination();
     const startAudio = async () => {
       await Tone.start();
+      /* Decoded and stretched before the first trial rather than during it:
+         both are asynchronous, and a syllable that arrives after its own trial
+         has ended is worse than one that never played — the response window has
+         already closed on it. Both are cached, so a second session is free. */
+      if (settings.syllableEnabled) await primeSyllables(syllableRate);
       Tone.Transport.start();
       runTrial(); // Kicks off the self-scheduling loop
     };
