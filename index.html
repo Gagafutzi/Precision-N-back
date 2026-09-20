@@ -5,17 +5,60 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Precision N-Back</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!--
+      The hub's look, applied where this app actually takes its colours from.
+
+      Everything here is Tailwind utilities — `bg-gray-900`, `text-cyan-400` and
+      ninety more — so retuning the custom properties below would have reached a
+      third of the page and left the rest grey and cyan. Remapping the two scales
+      the app uses reaches all of it, and no component has to be touched.
+
+      `gray` becomes the sage-tinted near-blacks the hub is built on and `cyan`
+      becomes the sage accent. Every other scale is untouched: green, red and
+      amber are right, wrong and warning here, and they mean things.
+
+      Radii go square, except `rounded-full` — that one is a circle, and the
+      circles are circles on purpose.
+    -->
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['ui-monospace', '"JetBrains Mono"', '"IBM Plex Mono"', '"SF Mono"',
+                     'SFMono-Regular', 'Menlo', 'Consolas', '"DejaVu Sans Mono"', 'monospace'],
+            },
+            colors: {
+              gray: {
+                50:'#eef5f0', 100:'#dcebe2', 200:'#bdd6c7', 300:'#9dbfab',
+                400:'#7e9a8a', 500:'#5b7264', 600:'#3f5348', 700:'#243329',
+                800:'#131d18', 900:'#0f1713', 950:'#080d0b',
+              },
+              cyan: {
+                50:'#eef5f0', 100:'#dcebe2', 200:'#c3ddce', 300:'#b7d8c5',
+                400:'#8fbda4', 500:'#74a389', 600:'#5b866e', 700:'#456954',
+                800:'#2f4b3b', 900:'#1c2f25', 950:'#0f1a14',
+              },
+            },
+            borderRadius: { none:'0', sm:'0', DEFAULT:'0', md:'0', lg:'0', xl:'0', '2xl':'0', '3xl':'0' },
+          },
+        },
+      };
+    </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
+      /* 'cyan' is the stored id of the default theme and existing settings carry
+         it, so the values move rather than the name — renaming it would need the
+         literal type in types.ts and every saved setting to move with it. */
       :root, :root[data-theme='cyan'] {
-        --color-primary: #22d3ee;
-        --color-secondary: #0891b2;
-        --color-secondary-hover: #0e7490;
-        --color-bg-base: #1f2937;
-        --color-bg-surface: #374151;
-        --color-text-base: #f3f4f6;
-        --color-text-muted: #9ca3af;
+        --color-primary: #8fbda4;
+        --color-secondary: #5b866e;
+        --color-secondary-hover: #456954;
+        --color-bg-base: #0f1713;
+        --color-bg-surface: #243329;
+        --color-text-base: #c9e0d3;
+        --color-text-muted: #7e9a8a;
         --color-accent-success: #22c55e;
         --color-accent-error: #ef4444;
         --color-accent-error-bg: #b91c1c;
@@ -110,7 +153,7 @@
 }
 </script>
 </head>
-  <body class="bg-gray-900 text-gray-100">
+  <body class="bg-gray-950 text-gray-100">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>
