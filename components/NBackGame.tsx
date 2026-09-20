@@ -1,43 +1,11 @@
 
-import React, { useState, useEffect, useRef, useCallback, useMemo, useId } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { NBackEvent, Score, Settings, Shape, Modality } from '../types';
-import { SYLLABLES, SYLLABLE_AUDIO } from '../syllableAudio';
-
-/*
- * Decoded once and held, not decoded per trial: decoding is asynchronous, and a
- * stimulus arriving after its own trial has ended is worse than one that never
- * played — the response window has already closed on it.
- */
-let sylCtx: AudioContext | null = null;
-const sylBuffers: (AudioBuffer | null)[] = [];
-
-async function primeSyllables() {
-  if (!sylCtx) sylCtx = new AudioContext();
-  if (sylCtx.state === 'suspended') { try { await sylCtx.resume(); } catch (e) { /* awaits a gesture */ } }
-  await Promise.all(SYLLABLES.map(async (name, i) => {
-    if (sylBuffers[i]) return;
-    const b64 = SYLLABLE_AUDIO[name];
-    if (!b64) return;
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
-    try { sylBuffers[i] = await sylCtx!.decodeAudioData(bytes.buffer); } catch (e) { sylBuffers[i] = null; }
-  }));
-}
-
-function playSyllable(index: number) {
-  const buf = sylBuffers[index];
-  if (!sylCtx || !buf) return;
-  if (sylCtx.state === 'suspended') sylCtx.resume();
-  const src = sylCtx.createBufferSource();
-  src.buffer = buf;
-  const g = sylCtx.createGain();
-  g.gain.value = 0.9;
-  src.connect(g).connect(sylCtx.destination);
-  src.start();
-}
-import ShapeDisplay, { ColorPatternSvg } from './ShapeDisplay';
-import { REST_ROT, Rot, at, fitFill, latticeLines, prismFaces, WORST_FILL } from './box3d';
+import { SYLLABLES } from '../syllableAudio';
+import { clampSyllableRate, playSyllable, primeSyllables } from '../syllableVoice';
+import ShapeDisplay from './ShapeDisplay';
+import { REST_ROT, Rot, at, fitFill, latticeLines, solidPatches, view, WORST_FILL } from './box3d';
+import { buildTexture, plainTexture } from './texture3d';
 
 declare namespace Tone {
   interface Synth {
@@ -116,7 +84,6 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
    * box holds its attitude when rotation is switched off, instead of snapping
    * back to the start.
    */
-  const clipBase = useId();
   const [rot, setRot] = useState<Rot>(REST_ROT);
   useEffect(() => {
     if (!settings.spatial3dEnabled || !settings.spatial3dRotate) return;
@@ -146,6 +113,21 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
     Math.max(200, settings.isi - 100),
   );
 
+  /* Clamped for the same reason, and by the same range the settings slider
+     offers: a stored rate of 0 would divide the speech by nothing. */
+  const syllableRate = clampSyllableRate(settings.syllableRate);
+
+  /* Likewise: a pool of one is a channel with nothing to remember, and a pool
+     larger than the inventory would index past the end of it. */
+  const syllablePool = Math.min(
+    SYLLABLES.length,
+    Math.max(4, Math.round(settings.syllablePoolSize || SYLLABLES.length)),
+  );
+  const pickSyllable = useCallback(
+    () => Math.floor(Math.random() * syllablePool),
+    [syllablePool],
+  );
+
   const [history, setHistory] = useState<NBackEvent[]>([]);
   const [currentEvent, setCurrentEvent] = useState<NBackEvent | null>(null);
   const [trialNumber, setTrialNumber] = useState(0);
@@ -166,6 +148,21 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   const scoreRef = useRef(score);
   const respondedToRef = useRef(new Set<string>());
   const activeModalitiesRef = useRef<Modality[]>([]);
+
+  /**
+   * The stimulus's material, rebuilt only when the trial's colours are.
+   *
+   * It is a closure over the trial's hues and its bubble or contour data, and
+   * the renderer calls it once per facet — a thousand times a frame while the
+   * box turns. Rebuilding it each frame would rebuild those arrays each frame
+   * too, for a texture that has not changed.
+   */
+  const texture = useMemo(
+    () => (settings.spatial3dEnabled && settings.colorEnabled && currentEvent
+      ? buildTexture(settings.colorPattern, currentEvent.hues, currentEvent.bubbleData, currentEvent.topoData)
+      : plainTexture()),
+    [settings.spatial3dEnabled, settings.colorEnabled, settings.colorPattern, currentEvent],
+  );
 
   const validNValues = useMemo(() => {
     if (!settings.variableN) return [];
@@ -224,9 +221,6 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
     }
     respondedToRef.current.add(responseKey);
   }, [feedbackEnabled]);
-
-  /* Decoding starts when the channel is switched on, not when a trial needs it. */
-  useEffect(() => { if (settings.syllableEnabled) void primeSyllables(); }, [settings.syllableEnabled]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -308,7 +302,7 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
         audio: 200 + Math.random() * 600,
         hues: generateRandomHues(),
         shape: generateBaseShape(settings.shapeVertices),
-        syllable: Math.floor(Math.random() * SYLLABLES.length),
+        syllable: pickSyllable(),
         isMatch: { audio: false, spatial: false, color: false, shape: false, syllable: false },
         lureType: 'none',
     };
@@ -410,7 +404,7 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
                    carry the target's own syllable, which would be a real match
                    rather than a lure. Fall back to a plain non-match. */
                 while (newEvent.syllable === targetEvent.syllable) {
-                  newEvent.syllable = Math.floor(Math.random() * SYLLABLES.length);
+                  newEvent.syllable = pickSyllable();
                 }
                 newEvent.lureType = 'none';
               }
@@ -450,7 +444,7 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
             }
             if (mod === 'syllable') {
               while (newEvent.syllable === targetEvent.syllable) {
-                newEvent.syllable = Math.floor(Math.random() * SYLLABLES.length);
+                newEvent.syllable = pickSyllable();
               }
             }
             if (mod === 'audio') {
@@ -470,7 +464,7 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
     
     setDevLureInfo(devInfoParts.join(' '));
     return newEvent;
-  }, [nLevel, variableN, matchRate, lureRate, settings, validNValues]);
+  }, [nLevel, variableN, matchRate, lureRate, settings, validNValues, pickSyllable]);
   
   const runTrial = useCallback(() => {
     const nextButtonHighlights: Record<Modality, 'none' | 'hit' | 'miss' | 'false_alarm'> = { spatial: 'none', audio: 'none', color: 'none', shape: 'none', syllable: 'none' };
@@ -535,6 +529,11 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
     synthRef.current = new Tone.Synth().toDestination();
     const startAudio = async () => {
       await Tone.start();
+      /* Decoded and stretched before the first trial rather than during it:
+         both are asynchronous, and a syllable that arrives after its own trial
+         has ended is worse than one that never played — the response window has
+         already closed on it. Both are cached, so a second session is free. */
+      if (settings.syllableEnabled) await primeSyllables(syllableRate);
       Tone.Transport.start();
       runTrial(); // Kicks off the self-scheduling loop
     };
@@ -645,23 +644,22 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
           } : null;
 
           const show = isStimulusVisible && currentEvent && centre;
-          const faces = show ? prismFaces({
+          const patches = show ? solidPatches({
             centre: centre!,
             /* Without the shape modality every stimulus is the same solid, so a
-               ring of equal radii — a cylinder — stands in for the circle the
-               flat board draws. */
+               plain sphere stands in for the circle the flat board draws. */
             radii: settings.shapeEnabled
               ? currentEvent!.shape.vertices.map(v => v.radius)
-              : Array.from({ length: 24 }, () => 1),
+              : [],
             radius,
-            depth: radius * 1.1,
             rot,
             fill,
+            texture,
           }) : [];
 
           /* Lattice edges behind the stimulus are drawn before it and the rest
              after, so the box passes in front of the solid as it turns. */
-          const mid = faces.length ? (faces[0].depth + faces[faces.length - 1].depth) / 2 : Infinity;
+          const mid = show ? view(centre!.x, centre!.y, centre!.z, rot).z : Infinity;
           const edge = (l: typeof lines[number], i: number) => (
             <line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2}
                   stroke="rgba(203,213,225,0.9)"
@@ -671,35 +669,14 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
 
           return (
             <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full">
-              <defs>
-                {faces.map((f, i) => f.kind === 'cap' && settings.colorEnabled ? (
-                  <clipPath key={i} id={`${clipBase}-${i}`}><polygon points={f.points} /></clipPath>
-                ) : null)}
-              </defs>
               {lines.filter(l => l.depth <= mid).map(edge)}
-              {faces.map((f, i) => (
-                <g key={i}>
-                  {f.kind === 'cap' && settings.colorEnabled ? (
-                    <g clipPath={`url(#${clipBase}-${i})`}>
-                      <g transform={`translate(${f.box.x} ${f.box.y}) scale(${f.box.s / 100})`}>
-                        <ColorPatternSvg
-                          hues={currentEvent!.hues}
-                          size={100}
-                          colorPattern={settings.colorPattern}
-                          bubbleData={currentEvent!.bubbleData}
-                          topoData={currentEvent!.topoData}
-                        />
-                      </g>
-                    </g>
-                  ) : (
-                    <polygon points={f.points} fill={settings.colorEnabled
-                      ? `hsl(${currentEvent!.hues[f.index % 3]}, 80%, 45%)`
-                      : 'var(--color-primary)'} />
-                  )}
-                  {/* One darkening pass over the finished face, so a pattern and
-                      a flat fill take the same light. */}
-                  <polygon points={f.points} fill="#000" opacity={1 - f.light} />
-                </g>
+              {/* Each path is every facet that came out the same colour. The
+                  hairline stroke is the facets' own colour: neighbours in
+                  different paths would otherwise show the background through
+                  the seam between them. */}
+              {patches.map((p, i) => (
+                <path key={i} d={p.d} fill={p.fill} stroke={p.fill}
+                      strokeWidth={0.12} strokeLinejoin="round" />
               ))}
               {lines.filter(l => l.depth > mid).map(edge)}
             </svg>
