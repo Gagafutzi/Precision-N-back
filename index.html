@@ -2,7 +2,9 @@
 <html lang="en" data-theme="cyan">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Precision N-Back</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
@@ -90,6 +92,87 @@
       .hover\:bg-button-color-hover:hover { background-color: var(--color-button-color-hover); }
       .bg-button-shape { background-color: var(--color-button-shape); }
       .hover\:bg-button-shape-hover:hover { background-color: var(--color-button-shape-hover); }
+
+
+      /* --- Phone fundamentals ---------------------------------------------
+         A phone's viewport is not the window: the browser's own chrome slides
+         in and out, so 100vh is taller than what you can actually see and the
+         bottom of a 100vh page sits under the address bar. 100dvh is the part
+         that is on screen, with the vh line left in front of it for anything
+         that does not know the unit yet. */
+      .app-shell { min-height: 100vh; min-height: 100dvh; }
+      .game-shell { height: 100vh; height: 100dvh; }
+
+      /* The notch and the home bar, only where they exist. */
+      .safe-area {
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-top: env(safe-area-inset-top);
+      }
+      .safe-area-x {
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+      }
+
+      html, body { height: 100%; }
+      body {
+        /* A swipe on the board should not drag the page or pull it down to
+           reload mid-session. */
+        overscroll-behavior: none;
+        -webkit-text-size-adjust: 100%;
+      }
+
+      /* A tap on a response button is an answer, timed to the trial: no
+           300 ms wait for a possible double-tap zoom, no grey flash, and no
+           text selection when the thumb lands slightly askew. */
+      button {
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      input[type='range'] {
+        accent-color: var(--color-primary);
+        height: 1.75rem;
+        touch-action: pan-y;
+      }
+      input[type='checkbox'] { accent-color: var(--color-primary); }
+      /* Under 16px iOS zooms the whole page in when a field takes focus. */
+      input, select, textarea { font-size: 16px; }
+
+      /*
+       * Controls at a size a thumb can actually hit.
+       *
+       * A finger pad is about 9 mm across and lands with roughly a 44px radius
+       * of uncertainty, which is the figure both phone platforms publish as the
+       * smallest reliable target. A mouse has no such trouble, so this applies
+       * only where the pointer is coarse: a desktop keeps its compact controls.
+       */
+      /* A checkbox is about a quarter the width of a fingertip. The row it sits
+         in is the real target, so the row carries the padding and the pointer,
+         and a tap anywhere along it toggles the box. */
+      .toggle-row {
+        cursor: pointer;
+        user-select: none;
+        -webkit-user-select: none;
+        padding-top: 0.5rem;
+        padding-bottom: 0.5rem;
+        min-height: 44px;
+      }
+
+      @media (pointer: coarse) {
+        button, select, input[type='number'], input[type='text'] { min-height: 44px; }
+        /* Stop a number field shrinking to its content once it has a minimum. */
+        input[type='number'] { padding-top: 0; padding-bottom: 0; }
+        input[type='checkbox'] { width: 1.75rem; height: 1.75rem; }
+        /* The thumb stays the size the platform draws it, but a press
+           anywhere in the control's box moves it, so a taller box is a taller
+           target — and the one that matters, since a slider is dragged rather
+           than aimed at. */
+        input[type='range'] { height: 2.75rem; }
+      }
 
       @keyframes pulse-once {
         0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.4); }

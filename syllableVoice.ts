@@ -111,6 +111,22 @@ function restretch() {
   stretchedRate = playbackRate;
 }
 
+/**
+ * Open the output, from inside a gesture that is allowed to open it.
+ *
+ * A phone keeps audio shut until a tap asks for it, and it has to be the tap's
+ * own handler: by the time a session has started and `primeSyllables` runs, the
+ * gesture is over and the resume is refused. Creating the context here, on the
+ * tap, is what the later playback inherits. Synchronous and cheap — it neither
+ * decodes nor waits, so it costs the gesture nothing.
+ */
+export function unlockSyllableAudio() {
+  try {
+    if (!ctx) ctx = new AudioContext();
+    if (ctx.state === 'suspended') ctx.resume();
+  } catch (e) { /* no audio on this device; the visual channels still run */ }
+}
+
 /** Decode the set, and stretch it, before any trial asks for it. */
 export async function primeSyllables(rate?: number) {
   if (rate !== undefined) playbackRate = clampSyllableRate(rate);

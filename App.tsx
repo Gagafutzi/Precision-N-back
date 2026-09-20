@@ -7,6 +7,7 @@ import SettingsComponent from './components/Settings';
 import Performance from './components/Performance';
 import { useLocalStorage } from './hooks/useLocalStorage';
 import { SYLLABLES } from './syllableAudio';
+import { unlockSyllableAudio } from './syllableVoice';
 
 const DEFAULT_SETTINGS: Settings = {
   nLevel: 2,
@@ -153,16 +154,35 @@ const App: React.FC = () => {
     setGameState(GameState.Finished);
   }, [settings, setPerformanceHistory, setSettings]);
   
+  /*
+   * Opening the audio output from inside the tap that starts the session.
+   *
+   * A phone will not let a page make a sound until a gesture asks for one, and
+   * it means the gesture's own handler: a resume from an effect a render later
+   * is already too late, and on iOS the whole session then plays silently. Both
+   * the tone synth and the speech clips run through contexts that are created
+   * lazily, so both are nudged here, where the touch still counts.
+   */
+  const unlockAudio = useCallback(() => {
+    try {
+      const tone = (window as unknown as { Tone?: { start?: () => Promise<void> } }).Tone;
+      tone?.start?.()?.catch(() => { /* the game starts either way */ });
+    } catch (e) { /* the game starts either way */ }
+    unlockSyllableAudio();
+  }, []);
+
   const handleStartTraining = useCallback(() => {
+    unlockAudio();
     if (settings.calibrationEnabled) {
       setIsCalibratingForGame(true);
       setGameState(GameState.Calibrating);
     } else {
       setGameState(GameState.Playing);
     }
-  }, [settings.calibrationEnabled]);
+  }, [settings.calibrationEnabled, unlockAudio]);
 
   const handleStartCalibration = () => {
+    unlockAudio();
     setIsCalibratingForGame(false);
     setGameState(GameState.Calibrating);
   };
@@ -171,33 +191,33 @@ const App: React.FC = () => {
     switch (gameState) {
       case GameState.Start:
         return (
-          <div className="text-center">
-            <h1 className="text-4xl font-bold mb-4 text-primary">Precision N-Back</h1>
-            <p className="max-w-2xl mx-auto mb-8 text-lg text-gray-300">
+          <div className="text-center w-full max-w-2xl">
+            <h1 className="text-3xl sm:text-4xl font-bold mb-3 sm:mb-4 text-primary">Precision N-Back</h1>
+            <p className="max-w-2xl mx-auto mb-6 sm:mb-8 text-base sm:text-lg text-gray-300">
               A cognitive training tool for high-fidelity sensory buffering and working memory.
             </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <div className="grid grid-cols-2 sm:flex sm:flex-row gap-3 sm:gap-4 justify-center">
               <button
                 onClick={handleStartTraining}
-                className="px-8 py-3 bg-secondary hover:bg-secondary-hover text-white font-bold rounded-lg transition-colors shadow-lg"
+                className="px-4 sm:px-8 py-4 sm:py-3 bg-secondary hover:bg-secondary-hover text-white font-bold rounded-lg transition-colors shadow-lg"
               >
                 Start Training
               </button>
                <button
                 onClick={handleStartCalibration}
-                className="px-8 py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-lg transition-colors shadow-lg"
+                className="px-4 sm:px-8 py-4 sm:py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-lg transition-colors shadow-lg"
               >
                 Calibrate
               </button>
               <button
                 onClick={() => setGameState(GameState.Settings)}
-                className="px-8 py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-lg transition-colors shadow-lg"
+                className="px-4 sm:px-8 py-4 sm:py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-lg transition-colors shadow-lg"
               >
                 Settings
               </button>
               <button
                 onClick={() => setGameState(GameState.Performance)}
-                className="px-8 py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-lg transition-colors shadow-lg"
+                className="px-4 sm:px-8 py-4 sm:py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-lg transition-colors shadow-lg"
               >
                 Performance
               </button>
@@ -219,9 +239,9 @@ const App: React.FC = () => {
           <div className="text-center w-full max-w-lg">
             <h2 className="text-3xl font-bold mb-4 text-primary">Session Complete</h2>
             {lastSessionStats ? (
-                <div className="p-6 bg-gray-800 rounded-lg mx-auto mb-8 text-left shadow-lg">
+                <div className="p-4 sm:p-6 bg-gray-800 rounded-lg mx-auto mb-6 sm:mb-8 text-left shadow-lg">
                     <h3 className="text-xl font-bold mb-4 text-center">Round Summary</h3>
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-lg">
+                    <div className="grid grid-cols-2 gap-x-4 sm:gap-x-6 gap-y-2 text-base sm:text-lg">
                         <span className="font-semibold text-gray-400">Accuracy:</span>
                         <span className="font-bold text-primary">{`${(lastSessionStats.accuracy! * 100).toFixed(0)}%`}</span>
                         
@@ -259,16 +279,16 @@ const App: React.FC = () => {
             ) : (
                 <p className="mb-8 text-gray-300">You've completed the session. Great work!</p>
             )}
-            <div className="flex gap-4 justify-center">
+            <div className="grid grid-cols-2 sm:flex gap-3 sm:gap-4 justify-center">
               <button
                 onClick={handleStartTraining}
-                className="px-8 py-3 bg-secondary hover:bg-secondary-hover text-white font-bold rounded-lg transition-colors shadow-lg"
+                className="px-4 sm:px-8 py-4 sm:py-3 bg-secondary hover:bg-secondary-hover text-white font-bold rounded-lg transition-colors shadow-lg"
               >
                 Train Again
               </button>
               <button
                 onClick={() => setGameState(GameState.Start)}
-                className="px-8 py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-lg transition-colors shadow-lg"
+                className="px-4 sm:px-8 py-4 sm:py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-lg transition-colors shadow-lg"
               >
                 Main Menu
               </button>
@@ -280,8 +300,19 @@ const App: React.FC = () => {
     }
   };
 
+  const playing = gameState === GameState.Playing;
   return (
-    <main className={`min-h-screen w-full flex flex-col items-center justify-center bg-gray-900 font-sans ${gameState === GameState.Playing ? "h-screen p-2" : "p-4"}`}>
+    /* While playing, the page is exactly the height of what is actually visible
+       on the phone (see .game-shell) and carries no horizontal padding, so the
+       board can run from one edge of the screen to the other. Everything else
+       is a scrolling page with room to breathe. */
+    <main
+      className={`w-full flex flex-col items-center bg-gray-900 font-sans safe-area-x ${
+        playing
+          ? 'game-shell justify-start overflow-hidden py-1 sm:p-2'
+          : 'app-shell justify-center overflow-y-auto p-3 sm:p-4 py-6'
+      }`}
+    >
       {renderContent()}
     </main>
   );

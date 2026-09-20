@@ -4,6 +4,14 @@ import { PerformanceRecord } from '../types';
 
 declare const Chart: any; // Using Chart.js from CDN
 
+const FALSE_ALARMS: [string, keyof PerformanceRecord['score']][] = [
+  ['Pos', 'spatialFalseAlarms'],
+  ['Aud', 'audioFalseAlarms'],
+  ['Col', 'colorFalseAlarms'],
+  ['Shp', 'shapeFalseAlarms'],
+  ['Syl', 'syllableFalseAlarms'],
+];
+
 interface PerformanceProps {
   history: PerformanceRecord[];
   onBack: () => void;
@@ -40,6 +48,19 @@ const Performance: React.FC<PerformanceProps> = ({ history, onBack }) => {
     setCurrentPage(1); // Reset page when changing filters
   };
 
+  /*
+   * Canvas is not CSS. A `var(--color-primary)` handed to Chart.js reaches a
+   * 2D context, which knows nothing about custom properties and falls back to
+   * black — which is how the lines and the legend came to be invisible against
+   * a dark background. Resolved here, against the live theme, so changing the
+   * theme still changes the chart.
+   */
+  const themeColor = (name: string, fallback: string) => {
+    if (typeof window === 'undefined') return fallback;
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+  };
+
   useEffect(() => {
     const data = chartHistory;
     if (data.length > 1 && chartRef.current) {
@@ -63,7 +84,7 @@ const Performance: React.FC<PerformanceProps> = ({ history, onBack }) => {
               {
                 label: 'Accuracy (%)',
                 data: accuracyData,
-                borderColor: 'var(--color-primary)',
+                borderColor: themeColor('--color-primary', '#22d3ee'),
                 backgroundColor: 'hsla(188, 80%, 52%, 0.2)',
                 yAxisID: 'yAccuracy',
                 tension: 0.1,
@@ -71,21 +92,21 @@ const Performance: React.FC<PerformanceProps> = ({ history, onBack }) => {
               {
                 label: 'Audio Δ',
                 data: audioData,
-                borderColor: 'var(--color-button-audio)',
+                borderColor: themeColor('--color-button-audio', '#7c3aed'),
                 yAxisID: 'yThresholds',
                 hidden: true,
               },
               {
                 label: 'Color Δ',
                 data: colorData,
-                borderColor: 'var(--color-button-color)',
+                borderColor: themeColor('--color-button-color', '#16a34a'),
                 yAxisID: 'yThresholds',
                 hidden: true,
               },
               {
                 label: 'Shape Δ',
                 data: shapeData,
-                borderColor: 'var(--color-button-shape)',
+                borderColor: themeColor('--color-button-shape', '#d97706'),
                 yAxisID: 'yThresholds',
                 hidden: true,
               },
@@ -102,26 +123,26 @@ const Performance: React.FC<PerformanceProps> = ({ history, onBack }) => {
                 min: 0,
                 max: 100,
                 grid: { color: 'rgba(255, 255, 255, 0.1)' },
-                ticks: { color: 'var(--color-text-muted)' }
+                ticks: { color: themeColor('--color-text-muted', '#9ca3af') }
               },
               yThresholds: {
                 type: 'logarithmic',
                 display: true,
                 position: 'right',
                 grid: { drawOnChartArea: false },
-                ticks: { color: 'var(--color-text-muted)' }
+                ticks: { color: themeColor('--color-text-muted', '#9ca3af') }
               },
               x: {
                  grid: { color: 'rgba(255, 255, 255, 0.1)' },
-                 ticks: { color: 'var(--color-text-muted)' }
+                 ticks: { color: themeColor('--color-text-muted', '#9ca3af') }
               }
             },
             plugins: {
-              legend: { labels: { color: 'var(--color-text-base)' } },
+              legend: { labels: { color: themeColor('--color-text-base', '#f3f4f6') } },
               tooltip: {
-                backgroundColor: 'var(--color-bg-surface)',
-                titleColor: 'var(--color-text-base)',
-                bodyColor: 'var(--color-text-muted)',
+                backgroundColor: themeColor('--color-bg-surface', '#374151'),
+                titleColor: themeColor('--color-text-base', '#f3f4f6'),
+                bodyColor: themeColor('--color-text-muted', '#9ca3af'),
               }
             }
           }
@@ -170,8 +191,8 @@ const Performance: React.FC<PerformanceProps> = ({ history, onBack }) => {
 
   return (
     <div className="p-4 sm:p-8 bg-gray-800 rounded-xl shadow-2xl w-full max-w-7xl text-gray-200">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-3xl font-bold text-primary text-center">Performance History</h2>
+      <div className="flex flex-wrap justify-between items-center gap-3 mb-6">
+        <h2 className="text-2xl sm:text-3xl font-bold text-primary">Performance History</h2>
         <div className="p-3 bg-gray-900/50 rounded-lg text-right">
             <span className="text-gray-400">Time Today: </span>
             <span className="text-xl font-bold text-primary">{formatDuration(totalTimeTodayMs)}</span>
@@ -179,7 +200,7 @@ const Performance: React.FC<PerformanceProps> = ({ history, onBack }) => {
       </div>
       
       {chartHistory.length > 1 ? (
-        <div className="mb-8 h-96 bg-gray-900/50 p-4 rounded-lg">
+        <div className="mb-6 sm:mb-8 h-64 sm:h-96 bg-gray-900/50 p-2 sm:p-4 rounded-lg">
           <canvas ref={chartRef}></canvas>
         </div>
       ) : (
@@ -189,61 +210,112 @@ const Performance: React.FC<PerformanceProps> = ({ history, onBack }) => {
       <div className="flex justify-center mb-4 border-b border-gray-700">
         <button 
           onClick={() => handleFilterChange('24h')} 
-          className={`px-6 py-2 text-lg font-semibold transition-colors ${timeFilter === '24h' ? 'text-primary border-b-2 border-primary' : 'text-gray-400 hover:text-gray-200'}`}
+          className={`px-4 sm:px-6 py-3 text-base sm:text-lg font-semibold transition-colors ${timeFilter === '24h' ? 'text-primary border-b-2 border-primary' : 'text-gray-400 hover:text-gray-200'}`}
         >
           Last 24 Hours
         </button>
         <button 
           onClick={() => handleFilterChange('all')} 
-          className={`px-6 py-2 text-lg font-semibold transition-colors ${timeFilter === 'all' ? 'text-primary border-b-2 border-primary' : 'text-gray-400 hover:text-gray-200'}`}
+          className={`px-4 sm:px-6 py-3 text-base sm:text-lg font-semibold transition-colors ${timeFilter === 'all' ? 'text-primary border-b-2 border-primary' : 'text-gray-400 hover:text-gray-200'}`}
         >
           All Time
         </button>
       </div>
 
-      <div className="overflow-x-auto">
+      <div>
         {tableHistory.length > 0 ? (
           <>
-            <table className="w-full text-left table-auto">
+            {/* Phone: a card per session. The table below is thirteen columns
+                wide, and thirteen columns on a 390px screen is either a
+                sideways scroll nobody discovers or type too small to read, so
+                on a phone each session becomes a block of labelled figures
+                instead. Same numbers, same order, no horizontal movement. */}
+            <ul className="sm:hidden space-y-3">
+              {[...tableHistory].reverse().map((record, index) => (
+                <li key={index} className="p-3 bg-gray-900/40 rounded-lg">
+                  <div className="flex justify-between items-baseline gap-2 mb-2">
+                    <span className="text-sm text-gray-300">{new Date(record.date).toLocaleString()}</span>
+                    <span className={`text-lg font-bold ${record.accuracy && record.accuracy > 0.75 ? 'text-accent-success' : 'text-gray-300'}`}>
+                      {record.accuracy !== undefined ? `${(record.accuracy * 100).toFixed(0)}%` : 'N/A'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-x-3 gap-y-1 text-sm">
+                    <span className="text-gray-400">N-Level</span>
+                    <span className="text-gray-400">Grid</span>
+                    <span className="text-gray-400">Hits / Misses</span>
+                    <span>{record.settings.nLevel}</span>
+                    <span>{`${record.settings.gridRows}x${record.settings.gridCols}`}</span>
+                    <span>
+                      <span className="text-accent-success">{getTotalHits(record.score)}</span>
+                      {' / '}
+                      <span className="text-accent-error">{record.score.misses}</span>
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-x-3 gap-y-1 text-sm mt-2">
+                    <span className="text-gray-400">Audio Δ</span>
+                    <span className="text-gray-400">Color Δ</span>
+                    <span className="text-gray-400">Shape Δ</span>
+                    <span>{record.settings.audioThreshold.toFixed(2)}</span>
+                    <span>{record.settings.colorThreshold.toFixed(2)}</span>
+                    <span>{record.settings.shapeThreshold.toFixed(3)}</span>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-2">
+                    False alarms — {FALSE_ALARMS.map(([label, key], i) => (
+                      <React.Fragment key={key}>
+                        {i > 0 && ' · '}{label} <span className="text-accent-error">{record.score[key] ?? 0}</span>
+                      </React.Fragment>
+                    ))}
+                  </p>
+                </li>
+              ))}
+            </ul>
+
+            {/* From a tablet up, the table — fourteen columns, so it keeps its
+                own sideways scroll rather than stretching the page. */}
+            <div className="hidden sm:block overflow-x-auto">
+            <table className="w-full min-w-[50rem] text-left table-auto">
               <thead>
                 <tr className="bg-gray-700 text-gray-300">
-                  <th className="p-3">Date</th>
-                  <th className="p-3">N-Level</th>
-                  <th className="p-3">Grid Size</th>
-                  <th className="p-3">Audio Δ</th>
-                  <th className="p-3">Color Δ</th>
-                  <th className="p-3">Shape Δ</th>
-                  <th className="p-3">Accuracy</th>
-                  <th className="p-3">Hits</th>
-                  <th className="p-3">Misses</th>
-                  <th className="p-3">Audio FA</th>
-                  <th className="p-3">Spatial FA</th>
-                  <th className="p-3">Color FA</th>
-                  <th className="p-3">Shape FA</th>
+                  <th className="p-2 sm:p-3 whitespace-nowrap">Date</th>
+                  <th className="p-2 sm:p-3 whitespace-nowrap">N-Level</th>
+                  <th className="p-2 sm:p-3 whitespace-nowrap">Grid Size</th>
+                  <th className="p-2 sm:p-3 whitespace-nowrap">Audio Δ</th>
+                  <th className="p-2 sm:p-3 whitespace-nowrap">Color Δ</th>
+                  <th className="p-2 sm:p-3 whitespace-nowrap">Shape Δ</th>
+                  <th className="p-2 sm:p-3 whitespace-nowrap">Accuracy</th>
+                  <th className="p-2 sm:p-3 whitespace-nowrap">Hits</th>
+                  <th className="p-2 sm:p-3 whitespace-nowrap">Misses</th>
+                  <th className="p-2 sm:p-3 whitespace-nowrap">Audio FA</th>
+                  <th className="p-2 sm:p-3 whitespace-nowrap">Spatial FA</th>
+                  <th className="p-2 sm:p-3 whitespace-nowrap">Color FA</th>
+                  <th className="p-2 sm:p-3 whitespace-nowrap">Shape FA</th>
+                  <th className="p-2 sm:p-3 whitespace-nowrap">Syllable FA</th>
                 </tr>
               </thead>
               <tbody>
                 {[...tableHistory].reverse().map((record, index) => (
                   <tr key={index} className="border-b border-gray-700 hover:bg-gray-700/50">
-                    <td className="p-3 text-sm">{new Date(record.date).toLocaleString()}</td>
-                    <td className="p-3 text-center">{record.settings.nLevel}</td>
-                    <td className="p-3 text-center">{`${record.settings.gridRows}x${record.settings.gridCols}`}</td>
-                    <td className="p-3 text-center">{record.settings.audioThreshold.toFixed(2)}</td>
-                    <td className="p-3 text-center">{record.settings.colorThreshold.toFixed(2)}</td>
-                    <td className="p-3 text-center">{record.settings.shapeThreshold.toFixed(3)}</td>
+                    <td className="p-2 sm:p-3 text-sm">{new Date(record.date).toLocaleString()}</td>
+                    <td className="p-2 sm:p-3 text-center">{record.settings.nLevel}</td>
+                    <td className="p-2 sm:p-3 text-center">{`${record.settings.gridRows}x${record.settings.gridCols}`}</td>
+                    <td className="p-2 sm:p-3 text-center">{record.settings.audioThreshold.toFixed(2)}</td>
+                    <td className="p-2 sm:p-3 text-center">{record.settings.colorThreshold.toFixed(2)}</td>
+                    <td className="p-2 sm:p-3 text-center">{record.settings.shapeThreshold.toFixed(3)}</td>
                     <td className={`p-3 text-center font-bold ${record.accuracy && record.accuracy > 0.75 ? 'text-accent-success' : 'text-gray-300'}`}>
                       {record.accuracy !== undefined ? `${(record.accuracy * 100).toFixed(0)}%` : 'N/A'}
                     </td>
-                    <td className="p-3 text-center text-accent-success">{getTotalHits(record.score)}</td>
-                    <td className="p-3 text-center text-accent-error">{record.score.misses}</td>
-                    <td className="p-3 text-center text-accent-error">{record.score.audioFalseAlarms}</td>
-                    <td className="p-3 text-center text-accent-error">{record.score.spatialFalseAlarms}</td>
-                    <td className="p-3 text-center text-accent-error">{record.score.colorFalseAlarms}</td>
-                    <td className="p-3 text-center text-accent-error">{record.score.shapeFalseAlarms}</td>
+                    <td className="p-2 sm:p-3 text-center text-accent-success">{getTotalHits(record.score)}</td>
+                    <td className="p-2 sm:p-3 text-center text-accent-error">{record.score.misses}</td>
+                    <td className="p-2 sm:p-3 text-center text-accent-error">{record.score.audioFalseAlarms}</td>
+                    <td className="p-2 sm:p-3 text-center text-accent-error">{record.score.spatialFalseAlarms}</td>
+                    <td className="p-2 sm:p-3 text-center text-accent-error">{record.score.colorFalseAlarms}</td>
+                    <td className="p-2 sm:p-3 text-center text-accent-error">{record.score.shapeFalseAlarms}</td>
+                    <td className="p-2 sm:p-3 text-center text-accent-error">{record.score.syllableFalseAlarms ?? 0}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
             {timeFilter === 'all' && totalPages > 1 && (
               <div className="flex justify-center items-center mt-4 gap-4">
                 <button

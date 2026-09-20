@@ -279,8 +279,8 @@ const Calibration: React.FC<CalibrationProps> = ({ onComplete, onQuit, settings 
 
   const renderSelection = () => (
     <div className="text-center w-full max-w-md">
-        <h2 className="text-3xl font-bold mb-4 text-primary">Calibration Menu</h2>
-        <p className="mb-8 text-gray-300">We'll start with a tiny difference and increase it until you can spot it.</p>
+        <h2 className="text-2xl sm:text-3xl font-bold mb-4 text-primary">Calibration Menu</h2>
+        <p className="mb-6 sm:mb-8 text-gray-300">We'll start with a tiny difference and increase it until you can spot it.</p>
         <div className="grid grid-cols-2 gap-4 mb-8">
             {settings.audioEnabled && <button onClick={() => startModalityCalibration('audio')} className="p-4 bg-button-audio hover:bg-button-audio-hover rounded-lg">Audio<br/><span className="text-sm opacity-80">({settings.audioThreshold.toFixed(2)})</span></button>}
             {settings.colorEnabled && <button onClick={() => startModalityCalibration('color')} className="p-4 bg-button-color hover:bg-button-color-hover rounded-lg">Color<br/><span className="text-sm opacity-80">({settings.colorThreshold.toFixed(2)})</span></button>}
@@ -290,14 +290,36 @@ const Calibration: React.FC<CalibrationProps> = ({ onComplete, onQuit, settings 
     </div>
   );
 
+  /*
+   * Two shapes, chosen by the height of the screen rather than its width.
+   *
+   * Stacked, the way it reads on a desktop or a phone held upright: title,
+   * stimulus, answer. Held sideways a phone has around 390px of height and the
+   * stack does not fit in it — the stimulus alone would be most of it and the
+   * answer sits below the fold, so answering means scrolling the thing you are
+   * being asked about off the screen first.
+   *
+   * On anything that short the same three blocks become two columns instead:
+   * the stimulus on the left, spanning both rows, with the wording above the
+   * answer on the right. The row and column placements below only mean anything
+   * inside that grid, so the markup is one tree either way.
+   */
   const renderCalibration = () => (
-    <>
-      <h2 className="text-2xl font-bold mb-2 text-primary capitalize">{mode} Calibration</h2>
-      <p className="text-lg text-gray-300 mb-2 h-7">{instructionText}</p>
-      <p className="text-gray-400 mb-6 font-mono">
+    <div className="w-full flex flex-col items-center [@media(max-height:560px)]:grid [@media(max-height:560px)]:grid-cols-[minmax(0,48vh)_minmax(0,1fr)] [@media(max-height:560px)]:grid-rows-[1fr_auto] [@media(max-height:560px)]:gap-x-5 [@media(max-height:560px)]:items-center">
+      <div className="w-full flex flex-col items-center [@media(max-height:560px)]:col-start-2 [@media(max-height:560px)]:row-start-1 [@media(max-height:560px)]:self-end">
+      <h2 className="text-lg sm:text-2xl font-bold mb-1 sm:mb-2 text-primary capitalize text-center">{mode} Calibration</h2>
+      <p className="text-base sm:text-lg text-gray-300 mb-1 sm:mb-2 min-h-7 text-center">{instructionText}</p>
+      <p className="text-gray-400 mb-3 sm:mb-6 [@media(max-height:560px)]:mb-2 font-mono text-sm sm:text-base">
         Attempt: {trialCount + 1} | Current Delta: {currentTestThreshold.toFixed(3)}
       </p>
-      <div className="relative w-96 h-96 bg-gray-900 rounded-lg mb-6 flex items-center justify-center shadow-inner overflow-hidden">
+      </div>
+      {/* Square, and bounded by the screen in both directions: a fixed 24rem hung
+          off the side of a phone held upright, and a box sized by width alone
+          pushes Same and Different under the fold of a phone held sideways —
+          where answering means scrolling the stimulus away first. The vh term
+          is what keeps the answer in view; the box stays square either way,
+          since the stimulus is placed as a fraction of it. */}
+      <div className="[@media(max-height:560px)]:col-start-1 [@media(max-height:560px)]:row-start-1 [@media(max-height:560px)]:row-span-2 relative w-[min(100%,45vh)] [@media(max-height:560px)]:w-full max-w-sm aspect-square mx-auto bg-gray-900 rounded-lg mb-4 sm:mb-6 [@media(max-height:560px)]:mb-0 flex items-center justify-center shadow-inner overflow-hidden">
           {currentStimulus && (
             <div className="absolute" style={{
               left: `50%`,
@@ -320,16 +342,18 @@ const Calibration: React.FC<CalibrationProps> = ({ onComplete, onQuit, settings 
           )}
           {feedback && <span className={`text-5xl font-bold ${feedback === 'correct' ? 'text-accent-success' : 'text-accent-error'}`}>{feedback === 'correct' ? 'Correct' : 'Incorrect'}</span>}
       </div>
-      <div className="flex space-x-4">
-          <button disabled={trialStep !== 'response'} onClick={() => handleResponse(true)} className="px-8 py-3 w-36 bg-gray-600 hover:bg-gray-500 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">Same</button>
-          <button disabled={trialStep !== 'response'} onClick={() => handleResponse(false)} className="px-8 py-3 w-36 bg-blue-600 hover:bg-blue-500 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">Different</button>
+      <div className="w-full max-w-sm flex flex-col items-center [@media(max-height:560px)]:col-start-2 [@media(max-height:560px)]:row-start-2 [@media(max-height:560px)]:self-start">
+        <div className="flex gap-4 w-full">
+            <button disabled={trialStep !== 'response'} onClick={() => handleResponse(true)} className="flex-1 px-4 py-4 sm:py-3 font-bold bg-gray-600 hover:bg-gray-500 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">Same</button>
+            <button disabled={trialStep !== 'response'} onClick={() => handleResponse(false)} className="flex-1 px-4 py-4 sm:py-3 font-bold bg-blue-600 hover:bg-blue-500 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">Different</button>
+        </div>
+        <button onClick={handleEndCalibrationRun} className="mt-4 sm:mt-6 [@media(max-height:560px)]:mt-3 px-4 py-3 bg-red-800 hover:bg-red-700 text-white rounded-lg transition-colors text-sm">End & Return to Menu</button>
       </div>
-      <button onClick={handleEndCalibrationRun} className="mt-6 px-4 py-2 bg-red-800 hover:bg-red-700 text-white rounded-lg transition-colors text-sm">End & Return to Menu</button>
-    </>
+    </div>
   );
 
   return (
-    <div className="flex flex-col items-center justify-center p-8 bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl">
+    <div className="flex flex-col items-center justify-center p-3 sm:p-8 bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl">
       {mode === 'selection' ? renderSelection() : renderCalibration()}
     </div>
   );

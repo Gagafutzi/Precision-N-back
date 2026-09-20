@@ -25,6 +25,12 @@ declare namespace Tone {
   function start(): Promise<void>;
 }
 
+/* Three letters, not one: spatial and syllable share an initial, and two
+   counters both reading "S FA" is a scoreboard that cannot be read. */
+const FA_LABEL: Record<Modality, string> = {
+  spatial: 'Pos', audio: 'Aud', color: 'Col', shape: 'Shp', syllable: 'Syl',
+};
+
 interface NBackGameProps {
   settings: Settings;
   onGameEnd: (score: Score, totalMatchesByModality: Record<Modality, number>, completed: boolean, duration: number) => void;
@@ -136,7 +142,12 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   const [buttonHighlights, setButtonHighlights] = useState<Record<Modality, 'none' | 'hit' | 'miss' | 'false_alarm'>>({ spatial: 'none', audio: 'none', color: 'none', shape: 'none', syllable: 'none' });
   const [devLureInfo, setDevLureInfo] = useState<string>('');
   
-  const [stimulusSize, setStimulusSize] = useState(settings.ballSize * 100);
+  /* The board's drawn size in pixels, and the width the side controls take,
+     measured from the space left over rather than asked for as a percentage: on
+     a phone the height is what runs out first, and a board sized by width alone
+     would simply hang off the bottom. */
+  const [boardPx, setBoardPx] = useState({ w: 0, h: 0, col: 0 });
+  const boardRowRef = useRef<HTMLDivElement>(null);
   const gameBoardRef = useRef<HTMLDivElement>(null);
   const synthRef = useRef<Tone.Synth | null>(null);
   const transportEventIdRef = useRef<number | null>(null);
@@ -183,24 +194,69 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   useEffect(() => { trialNumberRef.current = trialNumber; }, [trialNumber]);
   useEffect(() => { scoreRef.current = score; }, [score]);
 
-  useEffect(() => {
-    const board = gameBoardRef.current;
-    if (!board) return;
+  /* The 3D box is drawn in a square viewport; the flat grid keeps the
+     proportions of its own rows and columns. */
+  const boardAspect = settings.spatial3dEnabled ? 1 : gridCols / gridRows;
 
-    const calculateSize = () => {
-        const boardWidth = board.offsetWidth;
-        const cellWidth = boardWidth / gridCols;
-        setStimulusSize(cellWidth * ballSize);
+  /*
+   * The board is fitted to what is left over, in both directions.
+   *
+   * The row it sits in is as wide as the screen and as tall as the header, the
+   * controls and the footer leave over, and — being a flex child with a zero
+   * basis — its size does not depend on anything inside it. So the whole layout
+   * can be worked out from that one measurement without any risk of the board's
+   * own size feeding back into it.
+   *
+   * The board takes the largest size of its own proportions that fits. Whatever
+   * width is then still spare goes to the side controls rather than being left
+   * as two empty margins: on a phone held sideways that is the difference
+   * between a button the width of a finger and one the width of a hand.
+   */
+  useEffect(() => {
+    const row = boardRowRef.current;
+    if (!row) return;
+
+    /* gap-4 between the columns and the board, and the widths the side columns
+       are allowed to take. Below Tailwind's `sm` the columns are not displayed
+       at all and the board has the row to itself. */
+    const GAP = 16, MIN_COL = 96, MAX_COL = 224;
+
+    const measure = () => {
+      const rowW = row.clientWidth;
+      const rowH = row.clientHeight;
+      if (!rowW || !rowH) return;
+
+      let col = 0;
+      let width = Math.min(rowW, rowH * boardAspect);
+
+      if (window.innerWidth >= 640) {
+        const avail = rowW - 2 * GAP;
+        width = Math.max(0, Math.min(avail - 2 * MIN_COL, rowH * boardAspect));
+        col = Math.min(MAX_COL, Math.max(MIN_COL, (avail - width) / 2));
+      }
+
+      setBoardPx(prev => (Math.abs(prev.w - width) < 0.5 && Math.abs(prev.col - col) < 0.5
+        ? prev
+        : { w: width, h: width / boardAspect, col }));
     };
 
-    const resizeObserver = new ResizeObserver(calculateSize);
-    resizeObserver.observe(board);
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(row);
+    measure();
 
-    // Initial calculation for first render
-    calculateSize();
+    /* The address bar sliding away on a phone changes the visible height
+       without resizing any element, so the row alone would not hear it. */
+    window.addEventListener('resize', measure);
+    window.addEventListener('orientationchange', measure);
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('orientationchange', measure);
+    };
+  }, [boardAspect]);
 
-    return () => resizeObserver.disconnect();
-  }, [gridCols, gridRows, ballSize]);
+  /* One cell of the board, scaled by the chosen stimulus size. */
+  const stimulusSize = (boardPx.w / gridCols) * ballSize;
 
   const handleUserResponse = useCallback((type: Modality) => {
     if (trialNumberRef.current === 0) return;
@@ -555,7 +611,10 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   };
 
   const getButtonClass = (modality: Modality) => {
-    const baseClasses = 'py-3 px-2 sm:px-4 text-sm sm:text-base md:text-lg font-bold text-white rounded-lg transition-all duration-150 w-full';
+    /* Tall enough to hit with a thumb without looking (44px is the smallest
+       target either phone platform considers reliable), and never narrower than
+       the text it holds. */
+    const baseClasses = 'min-h-[3.25rem] sm:min-h-0 py-3 px-2 sm:px-4 text-sm sm:text-base md:text-lg font-bold text-white rounded-lg transition-all duration-150 w-full leading-tight';
     const defaultClasses = 'bg-gray-600 hover:bg-gray-500';
 
     switch (buttonHighlights[modality]) {
@@ -581,48 +640,71 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   // Fix: Explicitly type accumulator and value in reduce to prevent type inference issues with Object.values.
   const totalHits = Object.values(score.hits).reduce((sum: number, h: number) => sum + h, 0);
 
-  const boardAspect = settings.spatial3dEnabled ? 1 : gridCols / gridRows;
+  /* Answered on pointer-down rather than on click: a tap's click arrives once
+     the browser has satisfied itself that no second tap is coming, and the
+     answer is being timed against the trial. A response is recorded once per
+     trial per modality, so the click that follows is a no-op. */
+  const respond = (modality: Modality) => ({
+    onPointerDown: (e: React.PointerEvent) => { e.preventDefault(); handleUserResponse(modality); },
+    onClick: () => handleUserResponse(modality),
+  });
+  const shortcut = (key: string) => <span className="hidden sm:inline text-xs opacity-70">({key})</span>;
   const responseButtons = [
-    settings.spatialEnabled && <button key="spatial" onClick={() => handleUserResponse('spatial')} className={getButtonClass('spatial')}>Position <span className="text-xs opacity-70">(A)</span></button>,
-    settings.colorEnabled && <button key="color" onClick={() => handleUserResponse('color')} className={getButtonClass('color')}>Color <span className="text-xs opacity-70">(F)</span></button>,
-    settings.audioEnabled && <button key="audio" onClick={() => handleUserResponse('audio')} className={getButtonClass('audio')}>Audio <span className="text-xs opacity-70">(L)</span></button>,
-    settings.shapeEnabled && <button key="shape" onClick={() => handleUserResponse('shape')} className={getButtonClass('shape')}>Shape <span className="text-xs opacity-70">(J)</span></button>,
-    settings.syllableEnabled && <button key="syllable" onClick={() => handleUserResponse('syllable')} className={getButtonClass('syllable')}>Syllable <span className="text-xs opacity-70">(K)</span></button>,
+    settings.spatialEnabled && <button key="spatial" {...respond('spatial')} className={getButtonClass('spatial')}>Position {shortcut('A')}</button>,
+    settings.colorEnabled && <button key="color" {...respond('color')} className={getButtonClass('color')}>Color {shortcut('F')}</button>,
+    settings.audioEnabled && <button key="audio" {...respond('audio')} className={getButtonClass('audio')}>Audio {shortcut('L')}</button>,
+    settings.shapeEnabled && <button key="shape" {...respond('shape')} className={getButtonClass('shape')}>Shape {shortcut('J')}</button>,
+    settings.syllableEnabled && <button key="syllable" {...respond('syllable')} className={getButtonClass('syllable')}>Syllable {shortcut('K')}</button>,
   ].filter(Boolean);
-  /* Split down both sides, the way Quad Box does: the board is then bounded by
-     the window's height rather than by whatever the controls leave over, and
-     neither hand reaches across. */
+  /* On anything wider than a phone, split down both sides the way Quad Box
+     does: the board is then bounded by the window's height rather than by
+     whatever the controls leave over, and neither hand reaches across. */
   const leftButtons = responseButtons.slice(0, Math.ceil(responseButtons.length / 2));
   const rightButtons = responseButtons.slice(Math.ceil(responseButtons.length / 2));
-  /* Always a column, at every width: the arrangement is what the hands learn,
-     so it should not depend on how wide the window happens to be. */
-  const sideColumn = 'flex flex-col gap-2 sm:gap-3 justify-center w-20 sm:w-28 md:w-36 lg:w-44 shrink-0';
+  /* Sized in the measuring pass above, so the controls take the width the board
+     cannot use. The buttons stretch to share the column's height. */
+  const sideColumn = 'hidden sm:flex flex-col gap-3 justify-center shrink-0 [&>button]:flex-1 [&>button]:max-h-32';
+  const sideColumnStyle = { width: boardPx.col ? `${boardPx.col}px` : undefined };
+  /* On a phone the controls go under the board instead of beside it. Two columns
+     of thumb-sized buttons eat about 200px of a 390px screen, which is most of
+     the board; below the board they cost a row of height the square board was
+     not using anyway, and the grid gets the full width of the screen.
+     They wrap rather than sit in fixed columns, and every row fills the width:
+     five buttons are three and two, not three and a ragged gap. */
+  const phoneBasis = responseButtons.length === 4 ? '45%' : '30%';
 
   return (
-    <div className="flex flex-col w-full h-full">
-      <div className="w-full flex justify-between items-center mb-1 px-1">
-        <h2 className="text-xl md:text-2xl font-bold text-primary">{getGameTitle()}</h2>
-        <div className="text-lg font-mono">Trial: {trialNumber} / {totalTrials}</div>
+    /* A column that is exactly as tall as the screen: header and controls take
+       what they need, the board takes the rest. Nothing scrolls, so a stray
+       swipe cannot move the board out from under the next trial. */
+    <div className="flex flex-col w-full h-full min-h-0">
+      <div className="w-full flex justify-between items-baseline gap-2 mb-1 px-1 shrink-0">
+        <h2 className="text-base sm:text-xl md:text-2xl font-bold text-primary truncate">{getGameTitle()}</h2>
+        <div className="text-sm sm:text-lg font-mono shrink-0">{trialNumber} / {totalTrials}</div>
       </div>
 
-      <div className="w-full flex flex-row items-center gap-2 sm:gap-4">
-        <div className={sideColumn}>{leftButtons}</div>
+      <div ref={boardRowRef} className="w-full flex-1 min-h-0 flex flex-row items-stretch gap-4">
+        <div className={sideColumn} style={sideColumnStyle}>{leftButtons}</div>
+      {/* The board's slot: all the width and height left over. The board itself
+          is centred inside it at the largest size of its own proportions that
+          fits — on a phone that is the full width of the screen, edge to edge. */}
+      <div className="flex-1 min-w-0 min-h-0 flex items-center justify-center">
       <div
         ref={gameBoardRef}
+        data-board
         /* No panel of its own in 3D: Quad Box's box sits on the page, and a
            card behind it reads as a wall the cube is standing against. */
-        className={`relative mx-auto flex-1 min-w-0 ${settings.spatial3dEnabled ? '' : 'bg-gray-900 rounded-lg shadow-inner'}`}
+        className={`relative ${settings.spatial3dEnabled ? '' : 'bg-gray-900 shadow-inner sm:rounded-lg'}`}
         style={{
           /* The flat grid lines belong to the 2D board. In 3D the lattice draws
              its own, or the fixed backdrop reads as a plane the cells float in
              front of. */
           ...(settings.spatial3dEnabled ? {} : gridStyle),
-          width: '100%',
-          /* The window's height less the header, the footer and the padding
-             around them — everything left over goes to the box. */
-          maxWidth: `min(100%, calc((100vh - 7rem) * ${boardAspect.toFixed(3)}))`,
-          aspectRatio: `${boardAspect}`,
+          width: boardPx.w ? `${boardPx.w}px` : '100%',
+          height: boardPx.h ? `${boardPx.h}px` : undefined,
+          aspectRatio: boardPx.h ? undefined : `${boardAspect}`,
           overflow: 'hidden',
+          touchAction: 'none',
         }}
       >
         {settings.spatial3dEnabled && (() => {
@@ -715,16 +797,34 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
         )}
       </div>
 
-        <div className={sideColumn}>{rightButtons}</div>
       </div>
 
-      <div className="mt-1 w-full flex justify-between items-center text-gray-400 font-mono px-1">
-        <button onClick={quitSession} className="px-4 py-2 bg-red-800 hover:bg-red-700 text-white font-bold rounded-lg text-sm">Quit</button>
+        <div className={sideColumn} style={sideColumnStyle}>{rightButtons}</div>
+      </div>
+
+      {/* Phone: the same buttons, under the board. */}
+      <div
+        className={`sm:hidden flex flex-wrap items-stretch gap-2 mt-2 px-2 ${
+          /* A board no taller than it is wide leaves height over on a phone
+             held upright. It goes to the buttons, where a bigger target is
+             worth having, rather than sitting as a gap under the grid. */
+          boardAspect >= 1 ? 'grow max-h-32' : 'shrink-0'
+        }`}
+      >
+        {responseButtons.map(b => (
+          <div key={(b as React.ReactElement).key} className="flex grow" style={{ flexBasis: phoneBasis }}>
+            {b}
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-1 w-full flex justify-between items-center gap-2 text-gray-400 font-mono px-2 pb-1 shrink-0">
+        <button onClick={quitSession} className="px-3 py-2 bg-red-800 hover:bg-red-700 text-white font-bold rounded-lg text-xs sm:text-sm shrink-0">Quit</button>
         {feedbackEnabled && (
-          <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-sm">
+          <div className="flex flex-wrap justify-end gap-x-3 gap-y-0.5 text-xs sm:text-sm">
               <p>Hits: <span className="text-accent-success">{totalHits}</span></p>
               <p>Misses: <span className="text-accent-error">{score.misses}</span></p>
-              {activeModalitiesRef.current.map(m => <p key={m}>{m.charAt(0).toUpperCase()} FA: <span className="text-accent-error">{score[`${m}FalseAlarms`]}</span></p>)}
+              {activeModalitiesRef.current.map(m => <p key={m}>{FA_LABEL[m]} FA: <span className="text-accent-error">{score[`${m}FalseAlarms`]}</span></p>)}
           </div>
         )}
       </div>
