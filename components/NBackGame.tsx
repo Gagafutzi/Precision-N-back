@@ -136,8 +136,12 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   const [buttonHighlights, setButtonHighlights] = useState<Record<Modality, 'none' | 'hit' | 'miss' | 'false_alarm'>>({ spatial: 'none', audio: 'none', color: 'none', shape: 'none', syllable: 'none' });
   const [devLureInfo, setDevLureInfo] = useState<string>('');
   
-  const [stimulusSize, setStimulusSize] = useState(settings.ballSize * 100);
-  const gameBoardRef = useRef<HTMLDivElement>(null);
+  /* The arrangement and the board's size, both measured off the boxes this
+     component was actually given — see the observer below. */
+  const [boardArea, setBoardArea] = useState({ w: 0, h: 0 });
+  const [portrait, setPortrait] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const boardAreaRef = useRef<HTMLDivElement>(null);
   const synthRef = useRef<Tone.Synth | null>(null);
   const transportEventIdRef = useRef<number | null>(null);
   const totalMatchesRef = useRef<Record<Modality, number>>({ spatial: 0, audio: 0, color: 0, shape: 0, syllable: 0 });
@@ -183,24 +187,44 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   useEffect(() => { trialNumberRef.current = trialNumber; }, [trialNumber]);
   useEffect(() => { scoreRef.current = score; }, [score]);
 
-  useEffect(() => {
-    const board = gameBoardRef.current;
-    if (!board) return;
+  /* Two boxes are watched, and between them they decide how big the board comes
+     out.
 
-    const calculateSize = () => {
-        const boardWidth = board.offsetWidth;
-        const cellWidth = boardWidth / gridCols;
-        setStimulusSize(cellWidth * ballSize);
+     The component's own box decides the arrangement. A column of keys down each
+     side is right on a wide window and ruinous on a portrait phone: two 5rem
+     columns out of 360px leave the board under half the screen, which is the
+     grid arriving "limited severely in size". Taller than it is wide, the keys
+     go under the board instead and the board gets the full width.
+
+     The board's own box decides the size. The old bound was
+     `calc(100vh - 7rem)`, and the window's height is the wrong number twice
+     over: the trainer runs inside the hub's frame, where the window is not the
+     box it was given, and 7rem is a guess at a header and a footer that are
+     whatever the font and the modality count make them. The box that is
+     actually there needs no guessing. */
+  useEffect(() => {
+    const measure = () => {
+      const root = rootRef.current;
+      const area = boardAreaRef.current;
+      if (root) setPortrait(root.clientHeight > root.clientWidth);
+      if (area) {
+        const w = area.clientWidth, h = area.clientHeight;
+        setBoardArea(prev => (prev.w === w && prev.h === h ? prev : { w, h }));
+      }
     };
 
-    const resizeObserver = new ResizeObserver(calculateSize);
-    resizeObserver.observe(board);
-
-    // Initial calculation for first render
-    calculateSize();
-
-    return () => resizeObserver.disconnect();
-  }, [gridCols, gridRows, ballSize]);
+    measure();
+    if (typeof ResizeObserver !== 'function') {
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }
+    const ro = new ResizeObserver(measure);
+    if (rootRef.current) ro.observe(rootRef.current);
+    if (boardAreaRef.current) ro.observe(boardAreaRef.current);
+    return () => ro.disconnect();
+    /* Re-run on the flip: the two arrangements hang the board area off different
+       nodes, so the observer would otherwise be left watching a detached one. */
+  }, [portrait]);
 
   const handleUserResponse = useCallback((type: Modality) => {
     if (trialNumberRef.current === 0) return;
@@ -555,7 +579,13 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   };
 
   const getButtonClass = (modality: Modality) => {
-    const baseClasses = 'py-3 px-2 sm:px-4 text-sm sm:text-base md:text-lg font-bold text-white rounded-lg transition-all duration-150 w-full';
+    /* Under the board a key is as wide as a third of the phone and there is
+       nothing else competing for the height, so it is sized for a thumb rather
+       than for the narrow column a side deck has to fit in. */
+    const sizeClasses = portrait
+      ? 'py-5 px-2 text-base min-h-[4rem]'
+      : 'py-3 px-2 sm:px-4 text-sm sm:text-base md:text-lg';
+    const baseClasses = `${sizeClasses} font-bold text-white rounded-lg transition-all duration-150 w-full`;
     const defaultClasses = 'bg-gray-600 hover:bg-gray-500';
 
     switch (buttonHighlights[modality]) {
@@ -582,6 +612,11 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   const totalHits = Object.values(score.hits).reduce((sum: number, h: number) => sum + h, 0);
 
   const boardAspect = settings.spatial3dEnabled ? 1 : gridCols / gridRows;
+  /* The largest box of that shape that fits the measured area. */
+  const boardW = Math.max(0, Math.min(boardArea.w, boardArea.h * boardAspect));
+  const boardH = boardW / boardAspect;
+  /* One cell across, times the ball size — the same meaning it has in 3D. */
+  const stimulusSize = (boardW / gridCols) * ballSize;
   const responseButtons = [
     settings.spatialEnabled && <button key="spatial" onClick={() => handleUserResponse('spatial')} className={getButtonClass('spatial')}>Position <span className="text-xs opacity-70">(A)</span></button>,
     settings.colorEnabled && <button key="color" onClick={() => handleUserResponse('color')} className={getButtonClass('color')}>Color <span className="text-xs opacity-70">(F)</span></button>,
@@ -589,139 +624,161 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
     settings.shapeEnabled && <button key="shape" onClick={() => handleUserResponse('shape')} className={getButtonClass('shape')}>Shape <span className="text-xs opacity-70">(J)</span></button>,
     settings.syllableEnabled && <button key="syllable" onClick={() => handleUserResponse('syllable')} className={getButtonClass('syllable')}>Syllable <span className="text-xs opacity-70">(K)</span></button>,
   ].filter(Boolean);
-  /* Split down both sides, the way Quad Box does: the board is then bounded by
-     the window's height rather than by whatever the controls leave over, and
-     neither hand reaches across. */
   const leftButtons = responseButtons.slice(0, Math.ceil(responseButtons.length / 2));
   const rightButtons = responseButtons.slice(Math.ceil(responseButtons.length / 2));
-  /* Always a column, at every width: the arrangement is what the hands learn,
-     so it should not depend on how wide the window happens to be. */
   const sideColumn = 'flex flex-col gap-2 sm:gap-3 justify-center w-20 sm:w-28 md:w-36 lg:w-44 shrink-0';
 
+  /* The board itself, built once and hung in whichever arrangement is up. */
+  const board = (
+    <div
+      /* No panel of its own in 3D: Quad Box's box sits on the page, and a
+         card behind it reads as a wall the cube is standing against. */
+      className={`relative ${settings.spatial3dEnabled ? '' : 'bg-gray-900 rounded-lg shadow-inner'}`}
+      style={{
+        /* The flat grid lines belong to the 2D board. In 3D the lattice draws
+           its own, or the fixed backdrop reads as a plane the cells float in
+           front of. */
+        ...(settings.spatial3dEnabled ? {} : gridStyle),
+        /* The largest box of this shape that fits the area measured above,
+           in pixels. Before the first measurement there is no area to fit
+           and the board falls back to the width it is given. */
+        width: boardW ? `${boardW}px` : '100%',
+        height: boardW ? `${boardH}px` : undefined,
+        aspectRatio: boardW ? undefined : `${boardAspect}`,
+        overflow: 'hidden',
+      }}
+    >
+      {settings.spatial3dEnabled && (() => {
+        /* A box that is not turning has no worst case to reserve room for, so
+           it is fitted to the attitude it is actually in. A turning one keeps
+           the widest attitude's scale throughout, or it would pulse. */
+        const fill = settings.spatial3dRotate ? WORST_FILL : fitFill(rot);
+        const lines = latticeLines(gridCols, gridRows, layers, rot, fill);
+
+        /* One cell across the tightest axis is the room the stimulus has, so
+           ballSize means the same thing here as it does on the flat board. */
+        const span = 1 / Math.max(gridCols, gridRows, layers);
+        const radius = ballSize * 0.5 * span;
+
+        const centre = currentEvent ? {
+          x: at(currentEvent.spatial.col + 0.5, gridCols),
+          y: at(currentEvent.spatial.row + 0.5, gridRows),
+          z: at(currentEvent.spatial.layer + 0.5, layers),
+        } : null;
+
+        const show = isStimulusVisible && currentEvent && centre;
+        const patches = show ? solidPatches({
+          centre: centre!,
+          /* Without the shape modality every stimulus is the same solid, so a
+             plain sphere stands in for the circle the flat board draws. */
+          radii: settings.shapeEnabled
+            ? currentEvent!.shape.vertices.map(v => v.radius)
+            : [],
+          radius,
+          rot,
+          fill,
+          texture,
+        }) : [];
+
+        /* Lattice edges behind the stimulus are drawn before it and the rest
+           after, so the box passes in front of the solid as it turns. */
+        const mid = show ? view(centre!.x, centre!.y, centre!.z, rot).z : Infinity;
+        const edge = (l: typeof lines[number], i: number) => (
+          <line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2}
+                stroke="rgba(203,213,225,0.9)"
+                strokeOpacity={0.30 + 0.70 * Math.min(1, Math.max(0, (l.near - 0.8) * 2.2))}
+                strokeWidth={0.16} strokeLinecap="round" />
+        );
+
+        return (
+          <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full">
+            {lines.filter(l => l.depth <= mid).map(edge)}
+            {/* Each path is every facet that came out the same colour. The
+                hairline stroke is the facets' own colour: neighbours in
+                different paths would otherwise show the background through
+                the seam between them. */}
+            {patches.map((p, i) => (
+              <path key={i} d={p.d} fill={p.fill} stroke={p.fill}
+                    strokeWidth={0.12} strokeLinejoin="round" />
+            ))}
+            {lines.filter(l => l.depth > mid).map(edge)}
+          </svg>
+        );
+      })()}
+      {devMode && (
+        <div className="absolute top-2 left-2 px-2 py-1 bg-yellow-500/20 text-yellow-300 text-xs font-mono rounded z-10">
+          {devLureInfo}
+        </div>
+      )}
+      {variableN && !isStimulusVisible && currentEvent && trialNumber < totalTrials && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none">
+          <span className="text-9xl font-bold text-white opacity-10">{currentEvent.n}</span>
+        </div>
+      )}
+
+      {!settings.spatial3dEnabled && isStimulusVisible && currentEvent && (
+        <div className="absolute" style={{
+              left: `${(currentEvent.spatial.col + 0.5) / gridCols * 100}%`,
+              top: `${(currentEvent.spatial.row + 0.5) / gridRows * 100}%`,
+              transform: 'translate(-50%, -50%)',
+              width: `${stimulusSize}px`,
+              height: `${stimulusSize}px`
+            }}>
+          <ShapeDisplay
+              shape={currentEvent.shape}
+              hues={currentEvent.hues}
+              size={stimulusSize}
+              colorEnabled={settings.colorEnabled}
+              shapeEnabled={settings.shapeEnabled}
+              colorPattern={settings.colorPattern}
+              bubbleData={currentEvent.bubbleData}
+              topoData={currentEvent.topoData}
+          />
+        </div>
+      )}
+    </div>
+  );
+
   return (
-    <div className="flex flex-col w-full h-full">
-      <div className="w-full flex justify-between items-center mb-1 px-1">
-        <h2 className="text-xl md:text-2xl font-bold text-primary">{getGameTitle()}</h2>
-        <div className="text-lg font-mono">Trial: {trialNumber} / {totalTrials}</div>
+    <div ref={rootRef} className="flex flex-col w-full h-full">
+      <div className="w-full flex justify-between items-baseline gap-2 mb-1 px-1">
+        <h2 className={`font-bold text-primary ${portrait ? 'text-sm' : 'text-xl md:text-2xl'}`}>{getGameTitle()}</h2>
+        <div className={`font-mono shrink-0 ${portrait ? 'text-sm' : 'text-lg'}`}>Trial: {trialNumber} / {totalTrials}</div>
       </div>
 
-      <div className="w-full flex flex-row items-center gap-2 sm:gap-4">
-        <div className={sideColumn}>{leftButtons}</div>
-      <div
-        ref={gameBoardRef}
-        /* No panel of its own in 3D: Quad Box's box sits on the page, and a
-           card behind it reads as a wall the cube is standing against. */
-        className={`relative mx-auto flex-1 min-w-0 ${settings.spatial3dEnabled ? '' : 'bg-gray-900 rounded-lg shadow-inner'}`}
-        style={{
-          /* The flat grid lines belong to the 2D board. In 3D the lattice draws
-             its own, or the fixed backdrop reads as a plane the cells float in
-             front of. */
-          ...(settings.spatial3dEnabled ? {} : gridStyle),
-          width: '100%',
-          /* The window's height less the header, the footer and the padding
-             around them — everything left over goes to the box. */
-          maxWidth: `min(100%, calc((100vh - 7rem) * ${boardAspect.toFixed(3)}))`,
-          aspectRatio: `${boardAspect}`,
-          overflow: 'hidden',
-        }}
-      >
-        {settings.spatial3dEnabled && (() => {
-          /* A box that is not turning has no worst case to reserve room for, so
-             it is fitted to the attitude it is actually in. A turning one keeps
-             the widest attitude's scale throughout, or it would pulse. */
-          const fill = settings.spatial3dRotate ? WORST_FILL : fitFill(rot);
-          const lines = latticeLines(gridCols, gridRows, layers, rot, fill);
-
-          /* One cell across the tightest axis is the room the stimulus has, so
-             ballSize means the same thing here as it does on the flat board. */
-          const span = 1 / Math.max(gridCols, gridRows, layers);
-          const radius = ballSize * 0.5 * span;
-
-          const centre = currentEvent ? {
-            x: at(currentEvent.spatial.col + 0.5, gridCols),
-            y: at(currentEvent.spatial.row + 0.5, gridRows),
-            z: at(currentEvent.spatial.layer + 0.5, layers),
-          } : null;
-
-          const show = isStimulusVisible && currentEvent && centre;
-          const patches = show ? solidPatches({
-            centre: centre!,
-            /* Without the shape modality every stimulus is the same solid, so a
-               plain sphere stands in for the circle the flat board draws. */
-            radii: settings.shapeEnabled
-              ? currentEvent!.shape.vertices.map(v => v.radius)
-              : [],
-            radius,
-            rot,
-            fill,
-            texture,
-          }) : [];
-
-          /* Lattice edges behind the stimulus are drawn before it and the rest
-             after, so the box passes in front of the solid as it turns. */
-          const mid = show ? view(centre!.x, centre!.y, centre!.z, rot).z : Infinity;
-          const edge = (l: typeof lines[number], i: number) => (
-            <line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2}
-                  stroke="rgba(203,213,225,0.9)"
-                  strokeOpacity={0.30 + 0.70 * Math.min(1, Math.max(0, (l.near - 0.8) * 2.2))}
-                  strokeWidth={0.16} strokeLinecap="round" />
-          );
-
-          return (
-            <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full">
-              {lines.filter(l => l.depth <= mid).map(edge)}
-              {/* Each path is every facet that came out the same colour. The
-                  hairline stroke is the facets' own colour: neighbours in
-                  different paths would otherwise show the background through
-                  the seam between them. */}
-              {patches.map((p, i) => (
-                <path key={i} d={p.d} fill={p.fill} stroke={p.fill}
-                      strokeWidth={0.12} strokeLinejoin="round" />
-              ))}
-              {lines.filter(l => l.depth > mid).map(edge)}
-            </svg>
-          );
-        })()}
-        {devMode && (
-          <div className="absolute top-2 left-2 px-2 py-1 bg-yellow-500/20 text-yellow-300 text-xs font-mono rounded z-10">
-            {devLureInfo}
+      {portrait ? (
+        /* Portrait: the board takes the full width and the keys go under it,
+           three to a row and thumb-sized. */
+        <div className="flex-1 min-h-0 w-full flex flex-col gap-2">
+          <div ref={boardAreaRef} className="flex-1 min-h-0 w-full flex items-center justify-center">
+            {board}
           </div>
-        )}
-        {variableN && !isStimulusVisible && currentEvent && trialNumber < totalTrials && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none">
-            <span className="text-9xl font-bold text-white opacity-10">{currentEvent.n}</span>
+          <div
+            className="w-full grid gap-2 shrink-0"
+            style={{ gridTemplateColumns: `repeat(${Math.min(3, Math.max(1, responseButtons.length))}, minmax(0, 1fr))` }}
+          >
+            {responseButtons}
           </div>
-        )}
-
-        {!settings.spatial3dEnabled && isStimulusVisible && currentEvent && (
-          <div className="absolute" style={{
-                left: `${(currentEvent.spatial.col + 0.5) / gridCols * 100}%`,
-                top: `${(currentEvent.spatial.row + 0.5) / gridRows * 100}%`,
-                transform: 'translate(-50%, -50%)',
-                width: `${stimulusSize}px`,
-                height: `${stimulusSize}px`
-              }}>
-            <ShapeDisplay
-                shape={currentEvent.shape}
-                hues={currentEvent.hues}
-                size={stimulusSize}
-                colorEnabled={settings.colorEnabled}
-                shapeEnabled={settings.shapeEnabled}
-                colorPattern={settings.colorPattern}
-                bubbleData={currentEvent.bubbleData}
-                topoData={currentEvent.topoData}
-            />
+        </div>
+      ) : (
+        /* Landscape: split down both sides, the way Quad Box does. The board is
+           bounded by the height here, so the room beside it costs nothing and
+           neither hand reaches across. */
+        <div className="flex-1 min-h-0 w-full flex flex-row items-stretch gap-2 sm:gap-4">
+          <div className={sideColumn}>{leftButtons}</div>
+          <div ref={boardAreaRef} className="flex-1 min-w-0 h-full flex items-center justify-center">
+            {board}
           </div>
-        )}
-      </div>
+          <div className={sideColumn}>{rightButtons}</div>
+        </div>
+      )}
 
-        <div className={sideColumn}>{rightButtons}</div>
-      </div>
-
-      <div className="mt-1 w-full flex justify-between items-center text-gray-400 font-mono px-1">
-        <button onClick={quitSession} className="px-4 py-2 bg-red-800 hover:bg-red-700 text-white font-bold rounded-lg text-sm">Quit</button>
+      <div className="mt-1 w-full flex justify-between items-center gap-2 text-gray-400 font-mono px-1">
+        <button onClick={quitSession} className={`bg-red-800 hover:bg-red-700 text-white font-bold rounded-lg shrink-0 ${portrait ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm'}`}>Quit</button>
         {feedbackEnabled && (
-          <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-sm">
+          /* The tally is the one thing here that can be read later, so on a
+             phone it is what gives up its size rather than the board. */
+          <div className={`flex flex-wrap justify-end gap-y-1 ${portrait ? 'gap-x-2 text-[0.65rem] leading-tight' : 'gap-x-4 text-sm'}`}>
               <p>Hits: <span className="text-accent-success">{totalHits}</span></p>
               <p>Misses: <span className="text-accent-error">{score.misses}</span></p>
               {activeModalitiesRef.current.map(m => <p key={m}>{m.charAt(0).toUpperCase()} FA: <span className="text-accent-error">{score[`${m}FalseAlarms`]}</span></p>)}
