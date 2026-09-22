@@ -146,6 +146,18 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   const transportEventIdRef = useRef<number | null>(null);
   const totalMatchesRef = useRef<Record<Modality, number>>({ spatial: 0, audio: 0, color: 0, shape: 0, syllable: 0 });
   const startTimeRef = useRef<number>(Date.now());
+  /**
+   * Time the page spent hidden, and when it went.
+   *
+   * The session's recorded duration is wall-clock — `Date.now()` minus the
+   * start — and it is what the hub's meter reads through the archive's
+   * adapters to decide how much was trained today. Left uncorrected, going
+   * back to the hub menu for five minutes would be credited as five minutes
+   * of n-back, which is the one number this project is not allowed to get
+   * wrong.
+   */
+  const awayMsRef = useRef<number>(0);
+  const hiddenAtRef = useRef<number>(0);
   
   const historyRef = useRef(history);
   const trialNumberRef = useRef(trialNumber);
@@ -277,7 +289,9 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
   const endSession = useCallback((completed: boolean) => {
       Tone.Transport.stop();
       Tone.Transport.cancel();
-      const duration = Date.now() - startTimeRef.current;
+      /* Less whatever was spent with the page hidden: that time was not
+         trained, and the meter reads this figure. */
+      const duration = Date.now() - startTimeRef.current - awayMsRef.current;
       onGameEnd(scoreRef.current, totalMatchesRef.current, completed, duration);
   }, [onGameEnd]);
 
@@ -548,6 +562,52 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
     
     transportEventIdRef.current = Tone.Transport.schedule(runTrial, `+${nextIsi / 1000}`);
   }, [generateNextEvent, endSession, totalTrials, settings, stimulusDuration, feedbackEnabled]);
+
+  /**
+   * A hidden page is not being trained in front of.
+   *
+   * The shell hides this trainer in a frame when you go back to the hub menu
+   * and delivers the browser's own `visibilitychange`, which is the same
+   * signal a real tab switch sends — so both are served here.
+   *
+   * `display: none` is not enough on its own. It does stop
+   * `requestAnimationFrame`, which is why the 3D rotation above simply
+   * freezes; but the trials are scheduled on `Tone.Transport`, and the
+   * transport runs on the Web Audio clock, which nothing about being hidden
+   * stops. So a session went on presenting trials, and playing them, behind a
+   * menu.
+   *
+   * `pause` rather than `stop`: the transport keeps its position, so the
+   * self-scheduling loop resumes at the point in the ISI it had reached
+   * instead of firing the next trial immediately on the way back.
+   */
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.hidden) {
+        if (hiddenAtRef.current) return;   // already counted; browsers repeat
+        hiddenAtRef.current = Date.now();
+        Tone.Transport.pause();
+        return;
+      }
+      if (!hiddenAtRef.current) return;
+      awayMsRef.current += Date.now() - hiddenAtRef.current;
+      hiddenAtRef.current = 0;
+      Tone.Transport.start();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      /*
+       * Unmounted while hidden — quitting from the hub, say. The span still
+       * has to reach the total, or the session that ends next would be
+       * credited with an interruption nobody trained through.
+       */
+      if (hiddenAtRef.current) {
+        awayMsRef.current += Date.now() - hiddenAtRef.current;
+        hiddenAtRef.current = 0;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     synthRef.current = new Tone.Synth().toDestination();
