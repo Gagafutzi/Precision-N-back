@@ -4,7 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Precision N-Back</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Vendored, not fetched. Everything below is a Tailwind utility class
+         and this script is what turns them into CSS at run time, so without it
+         the page is not "missing a stylesheet" — it is unstyled boxes. Pinned
+         at the version cdn.tailwindcss.com was redirecting to; the bare URL
+         was whatever that host served that day.
+         Files under public/ are copied to the output root untouched, which is
+         why these three are the only ones in the app Vite does not process. -->
+    <script src="./vendor/tailwind-3.4.17.js"></script>
     <!--
       The hub's look, applied where this app actually takes its colours from.
 
@@ -45,8 +52,11 @@
         },
       };
     </script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Tone is the audio, Chart is the whole of Performance. Both were
+         globals off a CDN; chart.js was unpinned, so this names the version
+         that URL resolved to. -->
+    <script src="./vendor/tone-14.7.77.js"></script>
+    <script src="./vendor/chart-4.5.1.umd.js"></script>
     <style>
       /* 'cyan' is the stored id of the default theme and existing settings carry
          it, so the values move rather than the name — renaming it would need the
@@ -143,15 +153,10 @@
         animation: pulse-once 1.5s ease-out;
       }
     </style>
-  <script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@^19.2.3",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "react/": "https://esm.sh/react@^19.2.3/"
-  }
-}
-</script>
+  <!-- No importmap. Vite bundles React into the emitted asset, so these three
+       entries resolved nothing and were never requested — but they are the
+       first thing anyone auditing this page for network calls would find, and
+       a dead pointer at a CDN is worse than no pointer at all. -->
 </head>
   <body class="bg-gray-950 text-gray-100">
     <div id="root"></div>
