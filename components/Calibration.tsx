@@ -36,7 +36,7 @@ const ISI_MS = 750;
 const generateBaseShape = (numVertices: number): Shape => {
   const vertices = [];
   for (let i = 0; i < numVertices; i++) {
-    vertices.push({ radius: 0.6 + Math.random() * 0.4 });
+    vertices.push({ radius: 0.35 + Math.random() * 0.65 });  // as NBackGame
   }
   return { vertices };
 };

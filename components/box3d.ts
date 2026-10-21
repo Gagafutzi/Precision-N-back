@@ -137,29 +137,71 @@ const AMBIENT = 0.30;
 const SHADE_BANDS = 20;
 const SPEC_BANDS = 10;
 
-/** Roughly how many facets round the stimulus; rounded to a multiple of the
- *  vertex count so the shape's own corners land on facet edges. */
-const LON_TARGET = 60;
-/** Facet rows from pole to pole. */
-const LAT = 30;
+/** Facets round the stimulus, and rows from pole to pole. */
+const LON = 64;
+const LAT = 32;
 
 const TAU = Math.PI * 2;
 
-/**
- * The outline's radius at an arbitrary angle, along the straight edge between
- * two of its vertices — so the solid's widest cross-section is exactly the
- * polygon the flat board draws, not a smoothed version of it.
+/*
+ * Where each of the shape's vertices points, in the stimulus's own space.
+ *
+ * Spread over the whole sphere, not round its equator. The solid used to be
+ * the flat board's polygon swept from pole to pole, so every vertex lay on one
+ * band and the rest of the body was the same smooth dome for every shape: face
+ * on, two shapes differed by their outline; tumbling in the cube, which is most
+ * of the time, they were two near-spheres. With the vertices pointing every
+ * way, each shape has its own arrangement of lobes and hollows on every side,
+ * so whatever attitude the cube brings it in at, there is relief to know it by.
+ *
+ * A Fibonacci spiral, so the points are evenly spaced for any count and never
+ * fall into a symmetric pattern — a symmetric one would let two different
+ * shapes be the same object turned, and look identical when they are not.
  */
-function edgeRadius(radii: number[], i: number, lon: number): number {
-    const n = radii.length;
-    if (n < 3) return 1;
-    const t = (i * n) / lon;
-    const k = Math.floor(t);
-    const f = t - k;
-    const d = TAU / n;
-    const r0 = radii[k % n], r1 = radii[(k + 1) % n];
-    const denom = r0 * Math.sin(f * d) + r1 * Math.sin((1 - f) * d);
-    return denom > 1e-6 ? (r0 * r1 * Math.sin(d)) / denom : Math.max(r0, r1);
+const dirCache = new Map<number, Float64Array>();
+function vertexDirections(n: number): Float64Array {
+    let d = dirCache.get(n);
+    if (d) return d;
+    d = new Float64Array(n * 3);
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    for (let i = 0; i < n; i++) {
+        const y = 1 - (2 * (i + 0.5)) / n;
+        const r = Math.sqrt(1 - y * y);
+        const a = i * golden + 0.4;
+        d[i * 3] = Math.cos(a) * r;
+        d[i * 3 + 1] = y;
+        d[i * 3 + 2] = Math.sin(a) * r;
+    }
+    dirCache.set(n, d);
+    return d;
+}
+
+/*
+ * The body: a core, and one arm per vertex reaching out to that vertex's
+ * radius along its direction. Arms rather than a blend of radii, because a
+ * blend averages everything toward the middle — the first version of this
+ * did that and every shape came out a lumpy potato. An arm is something you
+ * can count and compare: this one long, that one barely there, two long ones
+ * close together. The body stays star-shaped about its centre (one radius per
+ * direction), which the back-face rule below relies on.
+ */
+const CORE = 0.42;
+/* An arm's angular half-width: cos of 42°. Narrow enough that arms read as
+   arms, wide enough that two neighbouring vertices never leave a crease. */
+const ARM_COS = 0.74;
+const ARM_SHAPE = 1.6;
+
+function solidRadius(radii: number[], dirs: Float64Array, x: number, y: number, z: number): number {
+    let r = CORE;
+    for (let i = 0; i < radii.length; i++) {
+        const dot = x * dirs[i * 3] + y * dirs[i * 3 + 1] + z * dirs[i * 3 + 2];
+        if (dot <= ARM_COS) continue;
+        const t = Math.pow((dot - ARM_COS) / (1 - ARM_COS), ARM_SHAPE);
+        // Smooth at the tip and at the root, so arms are rounded, not conical.
+        const s = t * t * (3 - 2 * t);
+        r = Math.max(r, CORE + (radii[i] - CORE) * s);
+    }
+    return r;
 }
 
 /** A run of facets that came out the same colour, merged into one path. */
@@ -168,20 +210,21 @@ export interface Patch { d: string; fill: string; }
 /**
  * The stimulus as a closed, lit, textured solid.
  *
- * The body is the shape's own outline swept from pole to pole: the equator is
- * the polygon exactly, so face-on the silhouette is the one the flat board
- * draws, and every other attitude is that outline seen as an object. Colour
+ * The body's radius in each direction comes from the shape's vertices, which
+ * point all round the sphere (see vertexDirections), so the same vertex radii
+ * that make the flat board's polygon make a lobed solid here with something to
+ * recognise it by from every side. Colour
  * comes from the solid texture, sampled at each facet's position *in the
  * stimulus's own space* — which is what makes the pattern turn with the solid
  * instead of sliding across it.
  *
  * Back faces are dropped rather than sorted. The body is star-shaped about its
- * centre and gently enough sloped that no front facet can hide another — even
- * at the deepest dent a lure can put in it, the front faces of a tumbling solid
- * overlap each other over a ten-thousandth of the area they cover, which is the
- * slivers where they meet at the poles. So what is left needs no depth order at
- * all, and that in turn lets facets of equal colour be merged into a single
- * path: a few dozen elements a frame instead of nearly a thousand.
+ * centre, so most of what faces the eye hides nothing else that does. With
+ * arms that is no longer exact — an arm pointing at the eye can stand in front
+ * of the side of another — so the merged colour groups are drawn far to near
+ * by their mean depth, which puts a near arm over a far one in practice. Not a
+ * true depth sort; what it buys is facets of equal colour merged into a single
+ * path: a few dozen elements a frame instead of a few thousand.
  */
 export function solidPatches(opts: {
     centre: Vec3;
@@ -193,9 +236,10 @@ export function solidPatches(opts: {
 }): Patch[] {
     const { centre, radii, radius, rot, fill, texture } = opts;
     const n = radii.length;
-    const lon = n >= 3 ? n * Math.max(3, Math.round(LON_TARGET / n)) : LON_TARGET;
+    const lon = LON;
     const rows = LAT + 1;
     const count = lon * rows;
+    const dirs = n >= 3 ? vertexDirections(n) : null;
 
     const m = rotMatrix(rot);
     const cvx = m[0] * centre.x + m[1] * centre.y + m[2] * centre.z;
@@ -207,24 +251,22 @@ export function solidPatches(opts: {
     const px = new Float64Array(count), py = new Float64Array(count);
     const vx = new Float64Array(count), vy = new Float64Array(count);
 
-    const rho = new Float64Array(lon);
     const ca = new Float64Array(lon), sa = new Float64Array(lon);
     for (let i = 0; i < lon; i++) {
         const a = (i / lon) * TAU - Math.PI / 2;
-        rho[i] = edgeRadius(radii, i, lon);
         ca[i] = Math.cos(a);
         sa[i] = Math.sin(a);
     }
 
     for (let j = 0; j < rows; j++) {
         const phi = -Math.PI / 2 + (j / LAT) * Math.PI;
-        // A touch fuller than a sphere, so more of the texture faces the eye.
-        const ring = Math.pow(Math.max(0, Math.cos(phi)), 0.8);
-        const zc = Math.sin(phi);
+        const ring = Math.max(0, Math.cos(phi));
+        const sz = Math.sin(phi);
         for (let i = 0; i < lon; i++) {
             const k = j * lon + i;
-            const ux = rho[i] * ring * ca[i];
-            const uy = rho[i] * ring * sa[i];
+            const dx = ring * ca[i], dy = ring * sa[i];
+            const rr = dirs ? solidRadius(radii, dirs, dx, dy, sz) : 1;
+            const ux = dx * rr, uy = dy * rr, zc = sz * rr;
             ox[k] = ux; oy[k] = uy; oz[k] = zc;
             const wx = m[0] * ux + m[1] * uy + m[2] * zc;
             const wy = m[3] * ux + m[4] * uy + m[5] * zc;

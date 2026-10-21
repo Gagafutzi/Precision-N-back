@@ -54,8 +54,13 @@ const getValidNValues = (maxN: number): number[] => {
     return validNs;
 };
 
+/* Radii from 0.35 to 1, not 0.6 to 1. In the narrower range every shape was
+   a gently dented ball, and two of them tumbling in the cube were hard to tell
+   apart however long you looked; deep hollows beside full lobes give each one
+   a relief of its own. The lure still moves one vertex by the threshold, so
+   the discrimination it measures is unchanged. */
 const generateBaseShape = (numVertices: number): Shape => ({
-  vertices: Array.from({ length: numVertices }, () => ({ radius: 0.6 + Math.random() * 0.4 }))
+  vertices: Array.from({ length: numVertices }, () => ({ radius: 0.35 + Math.random() * 0.65 }))
 });
 
 const generateRandomHues = (): [number, number, number] => {
