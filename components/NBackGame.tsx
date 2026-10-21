@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { NBackEvent, Score, Settings, Shape, Modality } from '../types';
 import { SYLLABLES } from '../syllableAudio';
-import { clampSyllableRate, playSyllable, primeSyllables } from '../syllableVoice';
+import { MAX_WORD_SYLLABLES, clampSyllableRate, playSyllable, primeSyllables, randomWord } from '../syllableVoice';
 import ShapeDisplay from './ShapeDisplay';
 import { REST_ROT, Rot, at, fitFill, latticeLines, solidPatches, view, WORST_FILL } from './box3d';
 import { buildTexture, plainTexture } from './texture3d';
@@ -123,9 +123,13 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
     SYLLABLES.length,
     Math.max(4, Math.round(settings.syllablePoolSize || SYLLABLES.length)),
   );
+  /* Syllables per stimulus: one is a syllable, more is a pseudoword said as
+     one unit. The stimulus is still a single number (see wordSyllables), so
+     matches and lures compare whole words with no change below. */
+  const syllableLength = Math.min(MAX_WORD_SYLLABLES, Math.max(1, Math.round(settings.syllableWordLength || 1)));
   const pickSyllable = useCallback(
-    () => Math.floor(Math.random() * syllablePool),
-    [syllablePool],
+    () => randomWord(syllablePool, syllableLength),
+    [syllablePool, syllableLength],
   );
 
   const [history, setHistory] = useState<NBackEvent[]>([]);
@@ -533,7 +537,7 @@ const NBackGame: React.FC<NBackGameProps> = ({ settings, onGameEnd }) => {
     setTrialNumber(t => t + 1);
     setIsStimulusVisible(true);
 
-    if (settings.syllableEnabled) playSyllable(newEvent.syllable);
+    if (settings.syllableEnabled) playSyllable(newEvent.syllable, syllablePool, syllableLength);
     if (settings.audioEnabled && synthRef.current) {
       synthRef.current.triggerAttackRelease(newEvent.audio, `${stimulusDuration / 1000}s`);
     }

@@ -113,6 +113,10 @@ export type Settings = {
      non-matches are things you heard recently anyway. Taken from the front of
      SYLLABLES, which is ordered to spread the inventory rather than group it. */
   syllablePoolSize: number;
+  /* Syllables said one after another per trial, as one pseudoword: 1 is the
+     single syllable, 4 is a four-syllable nonsense word. A match is the whole
+     word repeated. */
+  syllableWordLength: number;
   shapeVertices: number;
   colorPattern: ColorPattern;
   feedbackEnabled: boolean;
@@ -140,6 +144,7 @@ export type PerformanceRecord = {
     stimulusDuration?: number;
     syllableRate?: number;
     syllablePoolSize?: number;
+    syllableWordLength?: number;
   };
   score: Score;
   accuracy?: number; // Optional accuracy field

@@ -137,10 +137,49 @@ export function setSyllableRate(rate: number) {
   restretch();
 }
 
-export function playSyllable(index: number) {
+/*
+ * A pseudoword: `length` syllables said one after another, as one stimulus.
+ *
+ * The trial's stimulus is a single number, the word's syllables written as
+ * digits in base `pool`, so everything that compares stimuli — matches, lures,
+ * "not the same as n back" — compares whole words without knowing they are
+ * words. A word of one syllable is the syllable itself, so length 1 is exactly
+ * the channel as it was.
+ */
+export const MAX_WORD_SYLLABLES = 6;
+
+export function wordSyllables(code: number, pool: number, length: number): number[] {
+  const out: number[] = [];
+  let c = code;
+  for (let i = 0; i < length; i++) { out.push(c % pool); c = Math.floor(c / pool); }
+  return out;
+}
+
+/* Between syllables of one word: long enough that each syllable is heard as
+   its own unit, short enough that the word is heard as one thing. */
+const WORD_GAP_S = 0.03;
+
+/** One buffer for the whole word, so it plays as a single sound with no
+    scheduling seams between its syllables. */
+function wordBuffer(code: number, pool: number, length: number): AudioBuffer | null {
+  if (!ctx) return null;
+  const parts = wordSyllables(code, pool, length).map(i => playBuffers[i]).filter(Boolean) as AudioBuffer[];
+  if (!parts.length) return null;
+  if (parts.length === 1) return parts[0];
+  const rate = parts[0].sampleRate;
+  const gap = Math.round(rate * WORD_GAP_S);
+  const total = parts.reduce((n, b) => n + b.length, 0) + gap * (parts.length - 1);
+  const out = ctx.createBuffer(1, total, rate);
+  const data = out.getChannelData(0);
+  let at = 0;
+  parts.forEach(b => { data.set(b.getChannelData(0), at); at += b.length + gap; });
+  return out;
+}
+
+export function playSyllable(code: number, pool: number = SYLLABLES.length, length: number = 1) {
   if (!ctx) return;
   restretch();
-  const buf = playBuffers[index];
+  const buf = wordBuffer(code, pool, Math.max(1, Math.round(length)));
   if (!buf) return;
   if (ctx.state === 'suspended') ctx.resume();
 
@@ -159,14 +198,21 @@ export function playSyllable(index: number) {
   playing = src;
 }
 
-/** How long the longest syllable runs at a given speed, in ms. */
-export const syllableMaxMs = (rate: number) =>
-  Math.round(SYLLABLE_MAX_MS / clampSyllableRate(rate));
+/** How long the longest word of `length` syllables runs at a given speed, in ms. */
+export const syllableMaxMs = (rate: number, length = 1) =>
+  Math.round((SYLLABLE_MAX_MS * length) / clampSyllableRate(rate) + WORD_GAP_S * 1000 * (length - 1));
 
 /** For the settings screen: decode if needed, then say one from the pool that
     is in play, at the rate being previewed. */
-export async function previewSyllable(rate: number, pool = SYLLABLES.length) {
+export async function previewSyllable(rate: number, pool = SYLLABLES.length, length = 1) {
   await primeSyllables(rate);
   const size = Math.min(SYLLABLES.length, Math.max(1, Math.round(pool || SYLLABLES.length)));
-  playSyllable(Math.floor(Math.random() * size));
+  playSyllable(randomWord(size, length), size, length);
+}
+
+/** A random word of `length` syllables from the first `pool`, as its code. */
+export function randomWord(pool: number, length: number): number {
+  let code = 0, place = 1;
+  for (let i = 0; i < length; i++) { code += Math.floor(Math.random() * pool) * place; place *= pool; }
+  return code;
 }

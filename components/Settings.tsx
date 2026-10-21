@@ -7,6 +7,7 @@ import {
   SYLLABLE_RATE_MIN,
   previewSyllable,
   syllableMaxMs,
+  MAX_WORD_SYLLABLES,
 } from '../syllableVoice';
 
 interface SettingsProps {
@@ -110,17 +111,31 @@ const SettingsComponent: React.FC<SettingsProps> = ({ settings, onSave, onBack }
                      value={localSettings.syllableRate * 100}
                      onChange={handleSliderChange} className="w-1/3" />
               <button type="button"
-                      onClick={() => void previewSyllable(localSettings.syllableRate, localSettings.syllablePoolSize)}
+                      onClick={() => void previewSyllable(localSettings.syllableRate, localSettings.syllablePoolSize, localSettings.syllableWordLength || 1)}
                       className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">
                 Hear one
               </button>
             </div>
             <p className="text-xs text-gray-400 px-1">
               Slower speech is easier to identify and easier to rehearse; faster leaves
-              more of the interval silent. The longest syllable runs about {syllableMaxMs(localSettings.syllableRate)} ms here.
-              {syllableMaxMs(localSettings.syllableRate) > localSettings.isi && (
+              more of the interval silent. The longest {(localSettings.syllableWordLength || 1) > 1 ? 'word' : 'syllable'} runs about {syllableMaxMs(localSettings.syllableRate, localSettings.syllableWordLength || 1)} ms here.
+              {syllableMaxMs(localSettings.syllableRate, localSettings.syllableWordLength || 1) > localSettings.isi && (
                 <span className="text-yellow-400"> That is longer than the {localSettings.isi} ms interval, so it will be cut off by the next trial.</span>
               )}
+            </p>
+
+            <div className="flex justify-between items-center">
+              <label htmlFor="syllableWordLength">Syllables per Word</label>
+              <input type="range" name="syllableWordLength" id="syllableWordLength"
+                     min="1" max={MAX_WORD_SYLLABLES} step="1"
+                     value={localSettings.syllableWordLength || 1} onChange={handleChange}
+                     className="w-1/2" />
+              <span>{localSettings.syllableWordLength || 1}</span>
+            </div>
+            <p className="text-xs text-gray-400 px-1">
+              One is a single syllable. More are said straight after one another as one
+              nonsense word — four gives words like “teek-fohp-murn-lahl” — and a match
+              is the whole word again. Longer words need a longer interval.
             </p>
 
             <div className="flex justify-between items-center">

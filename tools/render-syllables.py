@@ -6,15 +6,28 @@ Run this, not a hand edit, whenever the syllable set or the rendering changes:
 
     python3 tools/render-syllables.py
 
-Needs flite (with its CMU slt voice) and lame on PATH; both are permissively
-licensed and both run locally, so nothing is fetched and no third-party
-recording is redistributed. On Debian/Ubuntu: apt-get install flite lame.
+Rendered with Piper, a neural TTS (MIT), and its LibriTTS "high" English voice
+(trained on LibriTTS, CC BY 4.0 — see VOICE below, and the attribution in
+syllableAudio.ts). Needs, in a Python environment:
 
-The syllables are synthesised from phones, not spelled words, so the set is a
+    pip install piper-tts lameenc numpy
+
+and the voice files from Piper's GitHub release (the Hugging Face mirror is not
+needed):
+
+    https://github.com/rhasspy/piper/releases/download/v0.0.2/voice-en-us-libritts-high.tar.gz
+
+then: python3 tools/render-syllables.py path/to/en-us-libritts-high.onnx
+
+It replaces flite's CMU slt voice, which was clear but plainly synthetic.
+
+The syllables are synthesised from phonemes, not spelled words, so the set is a
 designed inventory rather than a list someone thought of: every onset meets
-every vowel, and the coda follows from the pair. See INVENTORY below.
+every vowel, and the coda follows from the pair. See INVENTORY below. Spelling
+would not do: the voice's own rules read "book" as in book, where the inventory
+means the vowel of boot.
 
-What it does beyond calling flite: trims the silence flite pads each utterance
+What it does beyond calling the voice: trims the silence it pads each utterance
 with, fades 5 ms at each end so the clip cannot click, and matches the clips to
 one another in loudness. The last one matters more than it sounds — a set where
 one item is quieter is a set where that item is *harder to identify* for a
@@ -25,9 +38,7 @@ be an identity judgement at equal audibility.
 import base64
 import math
 import struct
-import subprocess
 import sys
-import tempfile
 import wave
 from pathlib import Path
 
@@ -35,9 +46,11 @@ from pathlib import Path
 # from its neighbours in the set as the English phoneme space allows — stops at
 # three places, a nasal, a liquid, two fricatives; the vowels at the corners and
 # edges of the vowel space rather than clustered in it.
-ONSETS = [("b", "b"), ("t", "t"), ("k", "k"), ("f", "f"), ("sh", "sh"), ("m", "m"), ("l", "l")]
-VOWELS = [("aa", "ah"), ("iy", "ee"), ("uw", "oo"), ("eh", "eh"), ("ow", "oh"), ("ay", "ai"), ("er", "ur")]
-CODAS = [("p", "p"), ("t", "t"), ("k", "k"), ("s", "ss"), ("n", "n"), ("ng", "ng"), ("l", "l")]
+# Each sound as (IPA phonemes for the voice, as spelled in the app).
+ONSETS = [(["b"], "b"), (["t"], "t"), (["k"], "k"), (["f"], "f"), (["ʃ"], "sh"), (["m"], "m"), (["l"], "l")]
+VOWELS = [(["ɑ", "ː"], "ah"), (["i", "ː"], "ee"), (["u", "ː"], "oo"), (["ɛ"], "eh"),
+          (["o", "ʊ"], "oh"), (["a", "ɪ"], "ai"), (["ɜ", "ː"], "ur")]
+CODAS = [(["p"], "p"), (["t"], "t"), (["k"], "k"), (["s"], "ss"), (["n"], "n"), (["ŋ"], "ng"), (["l"], "l")]
 K = len(ONSETS)
 
 
@@ -64,38 +77,48 @@ def inventory():
             onset, vowel, coda = ONSETS[i], VOWELS[j], CODAS[(i + j) % K]
             out.append((
                 onset[1] + vowel[1] + coda[1],                     # how it is spelled
-                f"pau {onset[0]} {vowel[0]} {coda[0]} pau",        # how it is said
+                onset[0] + ["ˈ"] + vowel[0] + coda[0] + ["."],     # how it is said
             ))
     return out
 
 
 SYLLABLES = inventory()
 
-VOICE = "slt"
-# Flite's own rate is brisk to the point of clipped. This is the "slightly
-# longer" baseline the speed control then moves around at playback time.
-DURATION_STRETCH = 1.15
-SILENCE_FLOOR = 0.02   # fraction of peak that still counts as silence
+# LibriTTS has 904 speakers; this is the one Piper itself uses as the default
+# (index 0, LibriTTS reader 3922). Chosen for being the default, not by ear.
+SPEAKER = 0
+# Slightly slower than the voice's own rate, for the reason flite's render was:
+# a syllable over before attention arrives is not a test of memory.
+LENGTH_SCALE = 1.15
+# Fraction of peak that still counts as silence. Lower than flite needed: this
+# voice releases a final p or k softly, and at 2% the trim took it for silence
+# and cut "bahp" to "bah".
+SILENCE_FLOOR = 0.006
 LEAD_MS = 12           # kept either side of the trimmed speech
 FADE_MS = 5
 TARGET_RMS = 0.14      # common loudness for every clip
 PEAK_CEILING = 0.95
-# kbps, mono 16 kHz. Measured against the un-encoded clips, 48 buys about a
-# decibel over 32 and costs 60% more bytes, and the whole set is inlined into
-# the bundle — so 32, and the size of the inventory goes into syllables.
-BITRATE = 32
+# kbps, mono, at the voice's 22.05 kHz. The whole set is inlined into the
+# bundle, so the bitrate is kept as low as stays clean.
+BITRATE = 40
 
 OUT = Path(__file__).resolve().parent.parent / "syllableAudio.ts"
 
 
-def render(phones: str, wav_path: Path) -> None:
-    """Synthesised from phones (-p), not from spelling: these are not words, and
-    flite's letter-to-sound rules would have to guess at them."""
-    subprocess.run(
-        ["flite", "-voice", VOICE, "--setf", f"duration_stretch={DURATION_STRETCH}",
-         "-p", phones, "-o", str(wav_path)],
-        check=True,
-    )
+def load_voice(model):
+    from piper import PiperVoice
+    return PiperVoice.load(model, config_path=model + ".json")
+
+
+def render(voice, phonemes):
+    """Phonemes straight to audio: these are not words, and the voice's
+    letter-to-sound rules would have to guess at them."""
+    from piper.config import SynthesisConfig
+    ids = voice.phonemes_to_ids(phonemes)
+    audio = voice.phoneme_ids_to_audio(
+        ids, SynthesisConfig(speaker_id=SPEAKER, length_scale=LENGTH_SCALE,
+                             noise_scale=0.5, noise_w_scale=0.6))
+    return voice.config.sample_rate, [float(x) for x in audio]
 
 
 def read_wav(path: Path):
@@ -149,24 +172,33 @@ def level(samples):
 
 
 def main() -> int:
+    import lameenc
+    if len(sys.argv) < 2:
+        print(__doc__, file=sys.stderr)
+        return 2
+    voice = load_voice(sys.argv[1])
     clips = {}
     longest_ms = 0
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp = Path(tmp)
-        for name, phones in SYLLABLES:
-            wav, clean, mp3 = tmp / f"{name}.wav", tmp / f"{name}.clean.wav", tmp / f"{name}.mp3"
-            render(phones, wav)
-            rate, samples = read_wav(wav)
-            samples = level(fade(trim(samples, rate), rate))
-            write_wav(clean, rate, samples)
-            subprocess.run(
-                ["lame", "-m", "m", "-b", str(BITRATE), "-q", "2", "--quiet", str(clean), str(mp3)],
-                check=True,
-            )
-            clips[name] = base64.b64encode(mp3.read_bytes()).decode("ascii")
-            longest_ms = max(longest_ms, round(1000 * len(samples) / rate))
-            print(f"  {name:<8} {len(samples) / rate:.2f}s  {mp3.stat().st_size / 1024:.1f}KB",
-                  file=sys.stderr)
+    for name, phones in SYLLABLES:
+        # The voice samples its prosody, so two renders of one syllable differ
+        # a little; three takes, keeping the one of median length, stops an
+        # occasional clipped or drawn-out render from becoming the stimulus.
+        takes = []
+        for _ in range(3):
+            rate, raw = render(voice, phones)
+            takes.append(trim(raw, rate))
+        takes.sort(key=len)
+        samples = level(fade(takes[1], rate))
+        enc = lameenc.Encoder()
+        enc.set_bit_rate(BITRATE)
+        enc.set_in_sample_rate(rate)
+        enc.set_channels(1)
+        enc.set_quality(2)
+        pcm = struct.pack(f"<{len(samples)}h", *[int(round(max(-1.0, min(1.0, x)) * 32767)) for x in samples])
+        mp3 = enc.encode(pcm) + enc.flush()
+        clips[name] = base64.b64encode(mp3).decode("ascii")
+        longest_ms = max(longest_ms, round(1000 * len(samples) / rate))
+        print(f"  {name:<8} {len(samples) / rate:.2f}s  {len(mp3) / 1024:.1f}KB", file=sys.stderr)
 
     header = OUT.read_text().split("export const SYLLABLES")[0]
     body = [header.rstrip("\n"), ""]
